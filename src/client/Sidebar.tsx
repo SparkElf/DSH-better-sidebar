@@ -50,6 +50,7 @@ import { layoutPushSize } from './layout-push.ts'
 import { parseDesktopEnv } from './desktop-env.ts'
 import { getWcoSnapshot, subscribeWco } from './wco.ts'
 import { getShellPreset } from './shell-presets.ts'
+import { hostWebSocketUrl } from './host-route-url.ts'
 import { computeTitleBarStrip } from './titlebar-strip.ts'
 import type { NewTabOption } from './TabBar.tsx'
 import { TAB_DRAG_TYPE, parseDrag, type TabDragPayload } from './TabBar.tsx'
@@ -315,7 +316,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
   // session header's right-aligned utilities (the "Session log" download
   // capsule) must yield. layout.css keys off this body attribute to push the
   // header's right padding out past the cluster. Only the CLOSED panel needs
-  // it — an open panel already squeezes `#root` left, moving the header clear.
+  // it — an open panel reserves AppFrame padding, moving the header clear.
   const collapsed = state === undefined || !state.panelOpen
   useEffect(() => {
     if (collapsed) document.body.setAttribute('data-dsh-sidebar-collapsed', '')
@@ -428,8 +429,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
     let failures = 0
     const connect = (): void => {
       if (closed) return
-      const url = new URL('/sidebar/ws/agent-terminals', location.origin)
-      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+      const url = hostWebSocketUrl('sidebar/ws/agent-terminals')
       url.search = new URLSearchParams({ sessionId }).toString()
       socket = new WebSocket(url.toString())
       socket.onmessage = (event) => {
@@ -485,8 +485,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
     let failures = 0
     const connect = (): void => {
       if (closed) return
-      const url = new URL('/sidebar/ws/agent-opens', location.origin)
-      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+      const url = hostWebSocketUrl('sidebar/ws/agent-opens')
       url.search = new URLSearchParams({ sessionId }).toString()
       socket = new WebSocket(url.toString())
       socket.onmessage = (event) => {
@@ -677,9 +676,9 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
   // from the AppFrame's center column DOM (the parent of the
   // [data-slot="conversation"] wrapper — layout.css's center column) so the
   // bottom panel tracks the column's real
-  // horizontal edges — including the animated margin-right push while the
-  // right panel opens/closes; a frame that never appears keeps the initial
-  // zero-size fallback (the panel renders at 0 width until measured).
+  // horizontal edges — including the animated AppFrame padding reservation
+  // while the right panel opens/closes; a frame that never appears keeps the
+  // initial zero-size fallback (the panel renders at 0 width until measured).
   // The rect lives in a REF (not state): the open/close transition resizes
   // the center column EVERY frame for its duration, and reacting per frame
   // with setState re-renders the whole Sidebar (every mounted tab) at
@@ -1665,8 +1664,8 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
           // Direct from the center column's measured right edge: the bottom
           // panel spans ONLY the center column, ending exactly at the
           // details column's left edge (the details column sits between the
-          // center and the right panel, and the right panel's margin-right
-          // push is already baked into centerRect.right).
+          // center and the right panel, and the right panel's reserved frame
+          // padding is already baked into centerRect.right).
           right: window.innerWidth - centerRectRef.current.right,
           // The seam against the open right panel needs its own hairline
           // (the right panel's border-left alone is covered by this panel's

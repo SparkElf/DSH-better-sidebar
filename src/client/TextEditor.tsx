@@ -250,7 +250,7 @@ export function TextEditor(props: FileViewerProps) {
    *  `mdText` stays untouched for selection/line lookup and for mermaid-block
    *  detection, which are unaffected by image syntax. */
   const previewText = markdown
-    ? rewriteLocalImageUrls(mdText, scope, path, window.location.origin)
+    ? rewriteLocalImageUrls(mdText, scope, path, document.baseURI)
     : mdText
   /** md/mermaid block split for the preview (mermaid fences lift out). Split
    *  only in preview mode: edit-mode keystrokes must not re-scan the source. */
@@ -277,7 +277,7 @@ export function TextEditor(props: FileViewerProps) {
    *  `media` identity, so a fresh object per render would re-sanitize every
    *  keystroke. */
   const htmlMedia = useMemo<MarkdownHtmlMedia>(
-    () => ({ scope, path, origin: window.location.origin }),
+    () => ({ scope, path, baseUrl: document.baseURI }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scope.sessionId, scope.cwd, path],
   )

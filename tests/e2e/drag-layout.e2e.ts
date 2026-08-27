@@ -2,23 +2,23 @@
  * Drag-layout lane: the width drag must track the app shell 1:1 — the
  * regression test for issue #92 ("主会话框左右抖动").
  *
- * The layout push squeezes `#root` via `margin-right: var(--dsh-sidebar-width)`
- * (layout.css), and layout.css disables that margin's transition while a drag
- * is live via `body[data-dsh-sidebar-dragging]`. If the transition stays
- * active during the drag (or the conversation lags the panel edge), the
+ * The layout push reserves `padding-right: var(--dsh-sidebar-width)` inside
+ * AppFrame (layout.css), and layout.css disables that padding's transition
+ * while a drag is live via `body[data-dsh-sidebar-dragging]`. If the transition
+ * stays active during the drag (or the conversation lags the panel edge), the
  * conversation visibly shakes at pointer cadence. This spec drives a real
  * pointer drag on the width strip while a requestAnimationFrame sampler
  * records, per frame:
  *
  *   - the strip's x (the panel edge),
- *   - the conversation column's right edge (`#root`'s margin push lands
+ *   - the conversation column's right edge (AppFrame's reserved padding lands
  *     exactly there),
  *   - whether `body[data-dsh-sidebar-dragging]` is set,
- *   - `#root`'s computed transition property/duration.
+ *   - AppFrame's computed transition property/duration.
  *
  * Then it asserts the drag contract:
  *   1. the dragging attribute is present during the drag;
- *   2. `#root`'s transition is disabled (none) during the drag;
+ *   2. AppFrame's transition is disabled (none) during the drag;
  *   3. the conversation edge follows the panel edge monotonically (no
  *      oscillation) and 1:1 (total travel within a rounding epsilon).
  *
@@ -177,15 +177,16 @@ test('width drag tracks the shell 1:1 with transitions disabled (issue #92)', as
       : [...host.querySelectorAll<HTMLElement>('*')]
         .filter(el => getComputedStyle(el).cursor === 'col-resize')
         .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x)[0]
-    // The conversation column: the grid item the layout push squeezes (the
-    // same nth-child(2) layout.css targets for the vertical push; its right
-    // edge is where the width push lands).
-    const center = document.querySelector('#root > div[data-slot="root"] > div > div:nth-child(2)')
-    const root = document.querySelector('#root') as HTMLElement
+    // The conversation column is the grid item whose right edge meets the
+    // AppFrame padding reservation and the plugin panel.
+    const center = document.querySelector('#root [data-dsh-frame] > [data-pane="conversation"]')
+      ?? document.querySelector('#root :has(> [data-slot="conversation"])')
+    const frame = (document.querySelector('#root [data-dsh-frame]')
+      ?? document.querySelector('#root > [data-slot="root"] > div')) as HTMLElement
     const loop = (): void => {
       const s = strip?.getBoundingClientRect() ?? { left: 0 }
       const c = center?.getBoundingClientRect() ?? { left: 0, right: 0 }
-      const cs = getComputedStyle(root)
+      const cs = getComputedStyle(frame)
       samples.push({
         t: performance.now(),
         stripX: s.left,
@@ -227,15 +228,15 @@ test('width drag tracks the shell 1:1 with transitions disabled (issue #92)', as
   // The conversation-column selector must have matched (the push lands on it).
   expect(last!.convoRight, 'the conversation edge must have moved with the drag').toBeLessThan(first!.convoRight - 40)
 
-  // Contract 1 + 2: while dragging, the body attribute is set and #root's
-  // margin transition is disabled (computed `transition: none` reads as
+  // Contract 1 + 2: while dragging, the body attribute is set and AppFrame's
+  // padding transition is disabled (computed `transition: none` reads as
   // transition-property "none" with 0s duration; the non-dragging rule would
-  // compute to "margin-right" with the theme duration).
+  // compute to "padding-right" with the theme duration).
   const draggingSamples = samples.filter(s => s.dragging)
   expect(draggingSamples.length).toBeGreaterThan(5)
   for (const sample of draggingSamples) {
-    expect(sample.transitionProperty, 'the margin transition must be off while dragging').toBe('none')
-    expect(sample.transitionDuration, 'the margin transition must be off while dragging').toBe('0s')
+    expect(sample.transitionProperty, 'the padding transition must be off while dragging').toBe('none')
+    expect(sample.transitionDuration, 'the padding transition must be off while dragging').toBe('0s')
   }
 
   // Contract 3: monotonic, 1:1 tracking. During a leftward drag both the
@@ -567,9 +568,9 @@ test('bottom panel never flashes full-width after a width drag release (issue #2
   // cleanup and setup phases — React can yield a render frame in that gap,
   // so the browser painted the push-less layout (center column full width),
   // the drag-end measure cached that full-width rect, and the bottom panel
-  // rendered full-width while #root's margin transition animated back to
-  // the new width. Every post-release frame must keep the two edges glued
-  // at the committed width: no full-width frame, no drift, no margin
+  // rendered full-width while AppFrame's padding transition animated back
+  // to the new width. Every post-release frame must keep the two edges glued
+  // at the committed width: no full-width frame, no drift, no padding
   // animation.
   await page.evaluate(() => {
     const samples: Array<{ t: number; bottomRight: number; colRight: number; varW: string; dragging: boolean; iw: number }> = []
