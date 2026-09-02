@@ -29,11 +29,13 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { SiCursor, SiZedindustries } from 'react-icons/si'
 import { VscFile, VscFolder, VscFolderOpened, VscLinkExternal, VscPin, VscPinned } from 'react-icons/vsc'
-import { api, downloadUrl, type FsEntry } from './api.ts'
+import { api, downloadUrl, isOutsideWorkspaceMessage, type FsEntry } from './api.ts'
+import { FenceErrorNotice } from './FenceErrorNotice.tsx'
 import { IconUploadOutline16, IconVscode16 } from './icons.tsx'
 import type { OpenWithTarget } from './open-with.ts'
 import { relativeTo } from './paths.ts'
 import { t } from './locales.ts'
+import type { SidebarStore } from './state.ts'
 import { uploadItemsFromDrop, uploadItemsFromFiles, type UploadItem } from './upload.ts'
 import css from './sidebar.module.css'
 
@@ -105,6 +107,8 @@ const ChatDropIllustration = () => (
 export function FileTree(props: {
   sessionId: string
   cwd: string | undefined
+  /** The sidebar store: the fence-refusal notice writes the `workspaceFence` pref through it. */
+  store: SidebarStore
   expanded: string[]
   /** Files highlighted by a "Show in folder" reveal (absolute paths). */
   revealed: string[]
@@ -136,7 +140,7 @@ export function FileTree(props: {
   /** True while an upload is in flight (drops are ignored). */
   busy: boolean
 }) {
-  const { sessionId, cwd, expanded, revealed, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, openWithTargets, openWithPinned, openWithSsh, onOpenWith, onToggleOpenWithPin, onReferenceFile, refreshTick, onUploadRequest, busy } = props
+  const { sessionId, cwd, store, expanded, revealed, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, openWithTargets, openWithPinned, openWithSsh, onOpenWith, onToggleOpenWithPin, onReferenceFile, refreshTick, onUploadRequest, busy } = props
   const [data, setData] = useState<Record<string, LevelData>>({})
   const dataRef = useRef(data)
   /** The row whose path was just copied ("copied" label replaces its button). */
@@ -257,6 +261,13 @@ export function FileTree(props: {
     })
   }, [sessionId, cwd, storeLevel])
 
+  /** Drop one level from the cache and reload it (the fence notice's retry). */
+  const retryDir = useCallback((dir: string) => {
+    delete dataRef.current[dir]
+    setData({ ...dataRef.current })
+    loadDir(dir)
+  }, [loadDir])
+
   // The caller's refresh tick wipes the cache (declared BEFORE the load
   // effect so the reload below sees the empty cache).
   const lastTick = useRef(refreshTick)
@@ -280,10 +291,21 @@ export function FileTree(props: {
   // (revealPaths), but the row may not be scrolled into sight — a reveal on
   // a long tree should surface the highlighted file. Re-runs when the tree
   // data or reveal set changes (the row appears after its level loads).
+  // Scrolls ONLY this tree's body: scrollIntoView would scroll every
+  // scrollable ancestor, and the clipping panel host
+  // ([data-dsh-panel-host]) is still programmatically scrollable — a deep
+  // reveal shifted the whole panel, tab bar included, out of the viewport.
   useEffect(() => {
     if (revealed.length === 0) return
-    const row = bodyRef.current?.querySelector('[data-dsh-revealed]')
-    row?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const body = bodyRef.current
+    if (body === null) return
+    const row = body.querySelector<HTMLElement>('[data-dsh-revealed]')
+    if (row === null) return
+    const bodyTop = body.getBoundingClientRect().top
+    const rowRect = row.getBoundingClientRect()
+    const target = body.scrollTop + (rowRect.top + rowRect.height / 2) - (bodyTop + body.clientHeight / 2)
+    const max = Math.max(body.scrollHeight - body.clientHeight, 0)
+    body.scrollTo({ top: Math.min(Math.max(target, 0), max), behavior: 'smooth' })
   }, [revealed, data])
 
   /** Copy `text`; on success flip the row's copied label for a moment. */
@@ -425,6 +447,16 @@ export function FileTree(props: {
       return <div className={css.explorerRow} style={{ paddingLeft: depth * 22 + 6 }}>{t('loading')}</div>
     }
     if (level.error !== undefined) {
+      // The fence refusal becomes the friendly notice (reason + one-click
+      // global off + immediate retry of this directory), never the raw
+      // `path "..." is outside workspace` wire text.
+      if (isOutsideWorkspaceMessage(level.error)) {
+        return (
+          <div style={{ paddingLeft: depth * 22 + 6 }}>
+            <FenceErrorNotice store={store} onDisabled={() => { retryDir(dir) }} />
+          </div>
+        )
+      }
       return (
         <div className={clsx(css.explorerRow, css.explorerError)} style={{ paddingLeft: depth * 22 + 6 }}>
           {level.error}

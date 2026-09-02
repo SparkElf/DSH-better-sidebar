@@ -44,7 +44,7 @@ command -v pnpm >/dev/null 2>&1 || die "未找到 pnpm（dsh plugin 转发给 pn
 # dsh CLI 解析：PATH 上的 dsh 优先，否则 npx 拉官方包（同 scripts/install.sh）
 if ! command -v "$DSH_CMD" >/dev/null 2>&1; then
   if command -v npx >/dev/null 2>&1; then
-    say "PATH 上无 $DSH_CMD，回退 npx -y --package @deepseek-ai/dsh"
+    say "PATH 上无 ${DSH_CMD}，回退 npx -y --package @deepseek-ai/dsh"
     DSH_CMD="npx -y --package @deepseek-ai/dsh dsh"
   else
     die "未找到 $DSH_CMD 或 npx；请先安装 DSH CLI（npm i -g @deepseek-ai/dsh）或用 DSH_CMD 指定"
@@ -95,7 +95,9 @@ trap cleanup EXIT
 
 # 步骤 1：引导 scratch profile（web 模板，镜像 dsh initProfile；先写
 # pnpm-workspace.yaml 的 allowBuilds / minimumReleaseAgeExclude，避免 pnpm 11
-# strict-dep-builds 拦截 node-pty/protobufjs 或拒绝 <24h 新版本——同 install.sh）
+# strict-dep-builds 拦截 node-pty/protobufjs 或拒绝 <24h 新版本——同 install.sh。
+# @deepseek-ai/* 通配与仓库根 pnpm-workspace.yaml 同策：钉的 DSH alpha 常在
+# 发布后 24h 内跑 lane，没有豁免会被 minimumReleaseAge 直接拒装）
 PROFILE_DIR="$DSH_HOME/profiles/web"
 cat > "$PROFILE_DIR/package.json" <<EOF
 {
@@ -123,6 +125,7 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - dsh-better-sidebar
+  - '@deepseek-ai/*'
 EOF
 
 # 步骤 2：官方 CLI 安装 tarball + bundle 协调（真实挂载路径）
@@ -147,6 +150,12 @@ say "启动 dsh web（port=${PORT}）..."
 $DSH_CMD web --port "$PORT" > "$WEB_LOG" 2>&1 &
 SERVER_PID=$!
 
+# 就绪行解析：DSH 0.1.2-alpha.1+ 打印的是带一次性 token 的鉴权 URL
+# （`dsh web: http://127.0.0.1:<port>/?token=<43字符>`，页面导航用它换取
+# 浏览器 cookie；干净 URL 只会得到 401）；0.1.1-rc.x 及更早是裸 origin。
+# 匹配必须延伸到空白（`[^ ]*`）——在 `/` 处截断会丢掉 token，alpha.1+
+# 宿主上的整条 lane 都会挂在首屏 401。LAN 后缀 `(LAN: …)` 是下一个
+# 空格分段，不会被并进来。
 URL=""
 for _ in $(seq 1 120); do
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -154,7 +163,7 @@ for _ in $(seq 1 120); do
     tail -30 "$WEB_LOG" >&2 || true
     exit 1
   fi
-  if URL="$(grep -oE 'dsh web: http://127\.0\.0\.1:[0-9]+' "$WEB_LOG" | head -1 | awk '{print $3}')" && [ -n "$URL" ]; then
+  if URL="$(grep -oE 'dsh web: http://127\.0\.0\.1:[0-9]+[^ ]*' "$WEB_LOG" | head -1 | awk '{print $3}')" && [ -n "$URL" ]; then
     break
   fi
   sleep 1
