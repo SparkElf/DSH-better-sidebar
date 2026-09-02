@@ -895,7 +895,7 @@ describe('side card settings routes', () => {
         bottomPanelAutoTerminal: true,
         terminalFontFamily: '',
         terminalFontSize: 13,
-        interceptOpenPath: true,
+        interceptOpenPath: false,
         editorExplorer: false,
         terminalShell: '',
         terminalShellArgs: '',

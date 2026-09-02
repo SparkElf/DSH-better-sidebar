@@ -321,11 +321,26 @@ export function apply(ctx: Context): void {
 
     ctx.effect(
       () => {
-        try {
-          return registerOpenPathInterception(ctx, sidebarStore)
-        } catch (error) {
-          fail('interception', error)
-          return () => {}
+        let disposeInterception: (() => void) | undefined
+        const syncInterception = (): void => {
+          const enabled = sidebarStore.getPrefs().interceptOpenPath === true
+          if (enabled === (disposeInterception !== undefined)) return
+          if (!enabled) {
+            disposeInterception?.()
+            disposeInterception = undefined
+            return
+          }
+          try {
+            disposeInterception = registerOpenPathInterception(ctx, sidebarStore)
+          } catch (error) {
+            fail('interception', error)
+          }
+        }
+        syncInterception()
+        const unsubscribe = sidebarStore.subscribe(syncInterception)
+        return () => {
+          unsubscribe()
+          disposeInterception?.()
         }
       },
       'dsh-better-sidebar: open-path interception',
