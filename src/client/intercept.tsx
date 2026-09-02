@@ -176,7 +176,13 @@ export function registerOpenPathInterception(ctx: Context, store: SidebarStore):
         takeoverEnabled: () => !store.getSuspended()
           && store.getPrefs().interceptOpenPath !== false
           && store.getPrefs().tabsEnabled['editor'] !== false,
-        currentSessionId: () => ctx.sessions.list.getSnapshot().current,
+        currentSessionId: () => {
+          const snapshot = ctx.sessions.list.getSnapshot()
+          const current = snapshot.current
+          if (current === undefined) return undefined
+          const cwd = snapshot.byId[current]?.cwd
+          return cwd === undefined || cwd === '' ? undefined : current
+        },
         openInSidebar: (path, sessionId) => { openSidebarFile(ctx, store, sessionId, path) },
         revealInExplorer: (_path, sessionId) => { revealInExplorer(ctx, store, sessionId, lastProduced) },
       })
