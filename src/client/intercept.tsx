@@ -174,7 +174,7 @@ export function registerOpenPathInterception(ctx: Context, store: SidebarStore):
       const service = fctx.get('remote.session') as OpenWorkspacePathService
       return wrapOpenWorkspacePath(service, {
         takeoverEnabled: () => !store.getSuspended()
-          && store.getPrefs().interceptOpenPath !== false
+          && store.getPrefs().interceptOpenPath === true
           && store.getPrefs().tabsEnabled['editor'] !== false,
         currentSessionId: () => {
           const snapshot = ctx.sessions.list.getSnapshot()

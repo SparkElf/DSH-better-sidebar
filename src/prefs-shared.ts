@@ -273,7 +273,7 @@ export const SIDEBAR_PREFS_DEFAULTS: SidebarPrefs = {
   bottomPanelAutoTerminal: true,
   terminalFontFamily: '',
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
-  interceptOpenPath: true,
+  interceptOpenPath: false,
   editorExplorer: false,
   changesDiffFloat: true,
   workspaceFence: true,

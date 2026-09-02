@@ -41,7 +41,7 @@ describe('side card preferences', () => {
         bottomPanelAutoTerminal: true,
         terminalFontFamily: '',
         terminalFontSize: 13,
-        interceptOpenPath: true,
+        interceptOpenPath: false,
         editorExplorer: false, changesDiffFloat: true,
         workspaceFence: true,
         terminalShell: '',
@@ -75,7 +75,7 @@ describe('side card preferences', () => {
         bottomPanelAutoTerminal: true,
         terminalFontFamily: '',
         terminalFontSize: 13,
-        interceptOpenPath: true,
+        interceptOpenPath: false,
         editorExplorer: false, changesDiffFloat: true,
         workspaceFence: true,
         terminalShell: '',
@@ -109,7 +109,7 @@ describe('side card preferences', () => {
         bottomPanelAutoTerminal: true,
         terminalFontFamily: '',
         terminalFontSize: 13,
-        interceptOpenPath: true,
+        interceptOpenPath: false,
         editorExplorer: false, changesDiffFloat: true,
         workspaceFence: true,
         terminalShell: '',
@@ -153,11 +153,11 @@ describe('side card preferences', () => {
       .toBe(false)
   })
 
-  it('defaults interceptOpenPath to true; only an explicit false turns the takeover off', async () => {
-    // Absent or malformed → on (the takeover is the safe default).
-    expect((await loadPrefs(wire({}))).interceptOpenPath).toBe(true)
-    expect((await loadPrefs(wire({ interceptOpenPath: 'yes' }))).interceptOpenPath).toBe(true)
-    expect((await loadPrefs(wire({ interceptOpenPath: 0 }))).interceptOpenPath).toBe(true)
+  it('defaults interceptOpenPath to false; only an explicit true turns the takeover on', async () => {
+    // Absent or malformed → off (remote method interception is opt-in).
+    expect((await loadPrefs(wire({}))).interceptOpenPath).toBe(false)
+    expect((await loadPrefs(wire({ interceptOpenPath: 'yes' }))).interceptOpenPath).toBe(false)
+    expect((await loadPrefs(wire({ interceptOpenPath: 0 }))).interceptOpenPath).toBe(false)
     // Explicit booleans survive verbatim.
     expect((await loadPrefs(wire({ interceptOpenPath: false }))).interceptOpenPath).toBe(false)
     expect((await loadPrefs(wire({ interceptOpenPath: true }))).interceptOpenPath).toBe(true)
