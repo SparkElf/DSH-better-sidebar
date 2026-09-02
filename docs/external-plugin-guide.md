@@ -673,6 +673,14 @@ ctx.effect(() =>
 | **id 冲突** | `registerTab` / `registerFileViewer` 对重复 id 抛错；建议用包前缀（`my-plugin:xxx`） |
 | **不要 value-import `dsh-better-sidebar`** | 即使是 `./client/service` 子路径，运行时落点也是 client bundle；只做 type-only import |
 | **client 声明图零 Node 依赖（v0.12.0+）** | `dsh-better-sidebar/client/service` 的可达声明面（含 `Context`）不引用 `node:*` / `Buffer`——纯浏览器侧插件无需 `@types/node`，`skipLibCheck: false` 也能编译（`scripts/check-consumer-types.sh` 守护；主入口含宿主声明，宿主消费者本就处于 Node 环境） |
+<<<<<<< HEAD
+=======
+| **家族右面板互斥（v0.13.0+）** | `aionui-panel` 设置的 `rightPanel` 解析为 `'aionui-panel'` 时整个侧边栏不挂载（`settings.get` 返回 `externalDisable: true`，挂载门 + 接管停用；`settings/document-updated` 推送实时生效，无 `remote` 服务回退启动时判定）。未安装 aionui 不受影响 |
+| **i18n 跟随** | 文案跟随 DSH `ctx.locale`（词典在 `betterSidebar` 命名空间；Host-backed `locale.preference` 优先于浏览器语言并实时切换；缺失回退浏览器）。消费插件**不要**依赖内部 `t()`——标题传字符串或 `() => string` |
+| **第三语言覆盖（ja 等）** | 可选 peer `@huanlin/dsh-plugin-better-locale`（optional）提供 ja/ko 覆盖，**借用 DSH 英文槽位**（仅 DSH=en 时生效，zh 下惰性）。经 `ctx.get('betterLocale')` 注入 `t()`；未安装整段 no-op |
+| **懒加载 chunk** | 重依赖（xterm/CodeMirror）在独立 bundle（`lib/client-<name>.js`），经 `/sidebar/bundle` 按需下发；factory 赋到 `globalThis.__dshChunks__[<name>]`，由 `src/client/chunk-loader.ts` 物化，**不经** `__ModuleLoader__`。对消费插件透明 |
+| **聊天文件打开漏斗（alpha 宿主）** | 聊天里一切文件打开（工具行 / 产物行 / 正文提及 / 行内代码路径）汇入 `ctx.remote.session.openWorkspacePath`（Typert remote 命名空间，cordis 服务 key `remote.session`，方法为 **accessor 属性**、异步挂载）。better-sidebar 的「聊天区文件在侧边栏打开」即在 `ctx.inject(['remote.session'], …)` 内以 defineProperty 遮蔽该方法（`src/client/openpath-intercept.ts`）。你的插件若要观测/旁路聊天文件打开，走同一服务；不要假设 pre-alpha 的 `ctx.workspaces.openPath` 存在（alpha 的 `IWorkspaces` 已无此方法） |
+>>>>>>> 3b3451a (fix(client): intercept the alpha chat file-open funnel (remote.session.openWorkspacePath))
 
 ---
 
