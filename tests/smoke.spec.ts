@@ -1188,3 +1188,15 @@ describe('agent sidebar-open tool gating', () => {
     watcherRef.current?.()
     expect(live()).toBe(1)
     expect(disposed).toBe(0)
+    // Flipping it back off unregisters it (and drains the undelivered queue).
+    enabled = false
+    watcherRef.current?.()
+    expect(live()).toBe(0)
+    expect(disposed).toBe(1)
+    // And a redundant toggle registers it fresh (no double-registration).
+    enabled = true
+    watcherRef.current?.()
+    expect(live()).toBe(1)
+    expect(registered).toBe(2)
+  })
+})
