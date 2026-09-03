@@ -22,7 +22,8 @@ function assertWithinWorkspace(workspace: string, target: string): void {
 }
 
 /**
- * Resolve an existing workspace path through symlinks and enforce containment.
+ * Resolve an existing workspace path through symlinks and (unless disarmed)
+ * enforce containment.
  *
  * @param cwd - Session workspace directory.
  * @param target - Client-supplied absolute path in the session's namespace.
@@ -37,7 +38,7 @@ export async function ensureWorkspacePath(cwd: string, target: string, fence = t
     resolveRealPath(cwd, 'workspace'),
     resolveRealPath(absolute, 'target'),
   ])
-  assertWithinWorkspace(realCwd, realTarget)
+  if (fence) assertWithinWorkspace(realCwd, realTarget)
   return realTarget
 }
 
@@ -63,7 +64,7 @@ export async function ensureWorkspaceWritePath(cwd: string, target: string, fenc
   for (;;) {
     try {
       const realTarget = await realpath(existingPath)
-      assertWithinWorkspace(realCwd, realTarget)
+      if (fence) assertWithinWorkspace(realCwd, realTarget)
       return missingSegments.reduce((path, segment) => join(path, segment), realTarget)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {

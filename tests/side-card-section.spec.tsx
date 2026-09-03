@@ -90,14 +90,14 @@ describe('SideCardSection declarative inventory', () => {
     expect(html).toContain('>explorer<')
     expect(html).toContain('data-icon="subagent"')
     expect(html).toContain('>Subagents<')
-    // Default prefs: openByDefault and interceptOpenPath both default off,
-    // while both tabs + the image viewer cards remain pressed
+    // Default prefs: only the interceptOpenPath switch is checked (openByDefault
+    // now defaults off), and both tabs + the image viewer cards pressed
     // (3 aria-pressed cards).
     // The nested auto-open toggle is NOT an inline card (it lives in the popup).
     expect(pressedCount(html, 'true')).toBe(3)
     expect(pressedCount(html, 'false')).toBe(0)
-    // The general toggles are custom switches; none are checked by default.
-    expect(html.match(/checked=""/g)?.length ?? 0).toBe(0)
+    // The general toggles are custom switches (real checkboxes, one checked).
+    expect(html.match(/checked=""/g)?.length).toBe(1)
     expect(html).not.toContain('Auto-open Subagents')
   })
 
@@ -153,9 +153,9 @@ describe('SideCardSection declarative inventory', () => {
     expect(html).toContain('>Subagents<')
     expect(html).toContain('>Image<')
     expect(pressedCount(html, 'false')).toBe(2)
-    // The explorer card stays pressed; general interception remains opt-in.
+    // The explorer card stays pressed; the one default-on general switch stays checked.
     expect(pressedCount(html, 'true')).toBe(1)
-    expect(html.match(/checked=""/g)?.length ?? 0).toBe(0)
+    expect(html.match(/checked=""/g)?.length).toBe(1)
   })
 
   it('hides the gear of a disabled feature (its related settings are dormant)', () => {
@@ -179,9 +179,10 @@ describe('SideCardSection declarative inventory', () => {
     expect(html).not.toContain('<select')
     expect(html).toContain('>Auto-detect<')
     // Three general-row switches remain (openByDefault + interceptOpenPath
-    // + agentOpenTools), all off by default; the scheme row is a dropdown.
+    // + agentOpenTools), only interceptOpenPath checked by default — the
+    // scheme row is a dropdown, not a switch.
     expect(html.match(/type="checkbox"/g)?.length).toBe(3)
-    expect(html.match(/checked=""/g)?.length ?? 0).toBe(0)
+    expect(html.match(/checked=""/g)?.length).toBe(1)
     // Auto (default) needs no further settings → no gear.
     expect(html).not.toContain('Position compatibility mode Feature settings')
 

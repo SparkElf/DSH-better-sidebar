@@ -63,11 +63,11 @@ type ChunkFactory = (require: (spec: string) => unknown) => ChunkExports
  * CLIENT_EXTERNALS in tsdown.config.ts — the chunk builds keep these
  * external and the loader resolves them here). A superset is safe: the
  * require only answers what the chunk actually asks for. The shell's static
- * module table seeds React, Cordis, and the UI libraries (primitives/slots);
- * `dsh-client-runtime/client` normalizes onto the runtime package row
- * (stripClientSuffix). dsh-client-web-react / dsh-client-schema-form were
- * dropped in DSH 0.1.0-rc.8 (no rc.8 publish, nothing requires them) — the
- * chunks never asked for them, so they no longer belong here.
+ * module table seeds React, Cordis, and the UI libraries (primitives/slots).
+ * `@deepseek-ai/dsh-client-runtime` was removed upstream in DSH 0.1.2-alpha
+ * (its seed row became bare-name `@deepseek-ai/dsh-client-store`) and no
+ * chunk ever required it, so its row is gone; so are dsh-client-web-react /
+ * dsh-client-schema-form, dropped back in DSH 0.1.0-rc.8.
  */
 export const CHUNK_EXTERNALS: readonly string[] = [
   'react',
@@ -77,11 +77,10 @@ export const CHUNK_EXTERNALS: readonly string[] = [
   'cordis',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-runtime/client',
 ]
 
 /** Chunk script endpoint served by the plugin host half (src/bundle-route.ts). */
-const CHUNK_URL = (name: ChunkName): string => hostRouteUrl(`sidebar/bundle/${name}.js`).href
+const CHUNK_URL = (name: ChunkName): string => `/sidebar/bundle/${name}.js`
 
 /** Bound on the revalidation HEAD round-trip. A timeout fails open (drop +
  *  re-fetch on the next open) so a stuck bundle route can never wedge lazy

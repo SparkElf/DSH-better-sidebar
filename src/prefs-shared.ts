@@ -81,6 +81,28 @@ export interface SidebarPrefs {
    */
   editorExplorer: boolean
   /**
+   * Where the changes tab's "expand to a diff tab" action lands the diff:
+   * true (default) floats it as a free window centered on the viewport;
+   * false docks it into the shell's diff pane below the source panel (the
+   * pre-float behavior). The select lives under the changes card's gear in
+   * the Side card settings.
+   */
+  changesDiffFloat: boolean
+  /**
+   * Whether the sidebar's filesystem routes enforce the workspace fence:
+   * every client-supplied path must resolve (through symlinks) inside the
+   * session workspace, else the route answers 403 "outside workspace". On
+   * by default; turning it OFF lets the file tree / editor read+write /
+   * media / HTML preview / upload routes reach ANY host path (e.g. the
+   * global ~/.dsh/AGENTS.md or a linked worktree outside the session cwd)
+   * — the trade-off being that any same-origin script (including
+   * third-party consumer plugins) can read/write outside the workspace
+   * through those routes while it is off. The switch lives under the files
+   * tab's gear in the Side card settings; the fence error surfaces offer a
+   * one-click global off + retry.
+   */
+  workspaceFence: boolean
+  /**
    * The shell the UI and agent terminals spawn (absolute path or bare
    * executable name). Empty (default) keeps the legacy resolution order:
    * `cordis.patch.yml` `config.shell`, then `$SHELL` / login shell /
@@ -254,8 +276,10 @@ export const SIDEBAR_PREFS_DEFAULTS: SidebarPrefs = {
   bottomPanelAutoTerminal: true,
   terminalFontFamily: '',
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
-  interceptOpenPath: false,
+  interceptOpenPath: true,
   editorExplorer: false,
+  changesDiffFloat: true,
+  workspaceFence: true,
   terminalShell: '',
   terminalShellArgs: '',
   titleBarScheme: 'auto',

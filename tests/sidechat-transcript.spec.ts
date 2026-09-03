@@ -8,7 +8,13 @@
 import { describe, expect, it } from 'vitest'
 import type { SidebarHistoryEntry, SidebarSessionEvent } from '../src/context-types.ts'
 import { SIDE_BOUNDARY_PREFIX, SIDE_BOUNDARY_PROMPT, SIDE_INJECTION_PLUGIN } from '../src/sidechat-core.ts'
-import { collectOwnEvents, toolArgsSummary, transcriptRows, type SidechatTranscriptRow } from '../src/client/sidechat-transcript.ts'
+import {
+  formatDurationMs,
+  formatTokens,
+  toolArgsSummary,
+  transcriptRows,
+  type SidechatTranscriptRow,
+} from '../src/client/sidechat-transcript.ts'
 
 /** One history entry (event + optional view). */
 function entry(event: SidebarSessionEvent): SidebarHistoryEntry {
@@ -164,66 +170,185 @@ describe('transcriptRows', () => {
   })
 })
 
-describe('collectOwnEvents', () => {
-  /** A paginated fake log: fetchPage(beforeSeq) returns the ≤pageSize events
-   *  ENDING before beforeSeq (exclusive); the tail page when omitted. */
-  function pagedLog(events: SidebarSessionEvent[], pageSize: number) {
-    const calls: Array<number | undefined> = []
-    const fetchPage = async (beforeSeq?: number): Promise<SidebarHistoryEntry[]> => {
-      calls.push(beforeSeq)
-      const window = beforeSeq === undefined ? events : events.filter(e => e.seq < beforeSeq)
-      return window.slice(-pageSize).map(entry)
-    }
-    return { fetchPage, calls }
+describe('turnSummary rows', () => {
+  it('emits one tail row per turn: envelope-time duration + last-input/summed-output usage', () => {
+    const entries = [
+      entry(ev('session/end-seed', 0)),
+      entry(ev('turn/start', 1, { turn: 1 })),
+      entry(ev('assistant/message', 2, { turn: 1, step: 1, message: { content: textBlocks('a') }, usage: { inputTokens: 100, outputTokens: 40 } })),
+      entry(ev('assistant/message', 3, { turn: 1, step: 2, message: { content: textBlocks('b') }, usage: { inputTokens: 160, outputTokens: 30 } })),
+      entry(ev('turn/end', 4, { turn: 1, reason: 'completed' })),
+    ]
+    const rows = transcriptRows(entries)
+    expect(rows.at(-1)).toEqual({ kind: 'turnSummary', seq: 4, inputTokens: 160, outputTokens: 70, durationMs: 3000 })
+  })
+
+  it('keeps a duration-only tail without usage and a usage-only tail without a turn/start', () => {
+    const cancelled = [
+      entry(ev('session/end-seed', 0)),
+      entry(ev('turn/start', 2, { turn: 1 })),
+      entry(ev('turn/end', 7, { turn: 1, reason: 'cancelled' })),
+    ]
+    expect(transcriptRows(cancelled).at(-1)).toEqual({ kind: 'turnSummary', seq: 7, durationMs: 5000 })
+
+    const seedCutStart = [
+      entry(ev('session/end-seed', 0)),
+      entry(ev('assistant/message', 2, { turn: 1, step: 1, message: { content: textBlocks('a') }, usage: { inputTokens: 10, outputTokens: 5 } })),
+      entry(ev('turn/end', 3, { turn: 1, reason: 'completed' })),
+    ]
+    expect(transcriptRows(seedCutStart).at(-1)).toEqual({ kind: 'turnSummary', seq: 3, inputTokens: 10, outputTokens: 5 })
+  })
+
+  it('skips the tail entirely when nothing is computable', () => {
+    const entries = [
+      entry(ev('session/end-seed', 0)),
+      entry(ev('turn/end', 1, { turn: 1, reason: 'completed' })),
+    ]
+    expect(transcriptRows(entries)).toEqual([])
+  })
+})
+
+describe('tool cards', () => {
+  const callRow = (seq: number, name: string, args: string): SidebarHistoryEntry =>
+    entry(ev('tool/call', seq, { turn: 1, step: 1, callId: `c${seq}`, name, arguments: args }))
+
+  const resultRow = (seq: number, callId: string, text: string, extra: Record<string, unknown> = {}): SidebarHistoryEntry =>
+    entry(ev('tool/result', seq, {
+      turn: 1,
+      step: 1,
+      message: {
+        source: { kind: 'tool', callId },
+        content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text }] }],
+      },
+      ...extra,
+    }))
+
+  const toolRow = (entries: readonly SidebarHistoryEntry[]) => {
+    const rows = transcriptRows(entries)
+    expect(rows).toHaveLength(1)
+    return rows[0] as Extract<SidechatTranscriptRow, { kind: 'tool' }>
   }
 
-  it('finds the seed boundary on the tail page in one fetch', async () => {
-    const { fetchPage, calls } = pagedLog([
-      ev('user/message', 0, { content: textBlocks('inherited'), source: { kind: 'user' } }),
-      ev('session/end-seed', 1),
-      ev('user/message', 2, { content: textBlocks('own'), source: { kind: 'user' } }),
-      ev('assistant/message', 3, { turn: 1, step: 1, message: { content: textBlocks('a') } }),
-    ], 200)
-    const result = await collectOwnEvents(fetchPage)
-    expect(calls).toEqual([undefined])
-    expect(result.seedBoundary).toBe(1)
-    expect(result.entries.map(e => e.event.seq)).toEqual([2, 3])
+  it('derives the call-time terminal card for bash and refines output/exit from the result marker', () => {
+    const row = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'bash', '{"command":"echo hi","workdir":"/w"}'),
+      resultRow(2, 'c1', 'hi\n[exit code: 3]'),
+    ])
+    expect(row.card).toEqual({ type: 'terminal', command: 'echo hi', cwd: '/w', output: 'hi', exitCode: 3 })
   })
 
-  it('walks back across pages until the boundary surfaces', async () => {
-    // A dense chunk tail (cold reads re-expand chunk-rows): the boundary is
-    // several pages back and earlier tool/call events must NOT fall out of
-    // the loaded window (the re-entry tool-row regression).
-    const events = [
-      ev('session/end-seed', 0),
-      ev('tool/call', 1, { turn: 1, step: 1, callId: 'c1', name: 'bash' }),
-      ...Array.from({ length: 12 }, (_, i) => ev('assistant/chunk', 2 + i, { turn: 1, step: 1 })),
-    ]
-    const { fetchPage, calls } = pagedLog(events, 5)
-    const result = await collectOwnEvents(fetchPage)
-    expect(calls.length).toBeGreaterThan(1)
-    expect(result.seedBoundary).toBe(0)
-    // Everything after the marker, oldest-first, deduped.
-    expect(result.entries.map(e => e.event.seq)).toEqual(events.slice(1).map(e => e.seq))
+  it('recovers the signal pill and defaults a marker-less settle to exit code 0', () => {
+    const signaled = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'bash', '{"command":"x"}'),
+      resultRow(2, 'c1', 'boom\n[killed by signal: SIGKILL]'),
+    ])
+    expect(signaled.card).toEqual({ type: 'terminal', command: 'x', output: 'boom', signal: 'SIGKILL' })
+
+    const clean = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'bash', '{"command":"x"}'),
+      resultRow(2, 'c1', 'ok'),
+    ])
+    expect(clean.card).toEqual({ type: 'terminal', command: 'x', output: 'ok', exitCode: 0 })
   })
 
-  it('stops at the log start when no marker exists and reports boundary 0', async () => {
-    const { fetchPage } = pagedLog([
-      ev('user/message', 0, { content: textBlocks('legacy'), source: { kind: 'user' } }),
-      ev('assistant/message', 1, { turn: 1, step: 1, message: { content: textBlocks('a') } }),
-    ], 200)
-    const result = await collectOwnEvents(fetchPage)
-    expect(result.seedBoundary).toBe(0)
-    expect(result.entries.map(e => e.event.seq)).toEqual([0, 1])
+  it('skips the terminal card for background bash and drops it on failed results', () => {
+    const background = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'bash', '{"command":"x","run_in_background":true}'),
+    ])
+    expect(background.card).toBeUndefined()
+
+    const failed = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'bash', '{"command":"x"}'),
+      resultRow(2, 'c1', 'denied', { error: { name: 'EACCES', code: 'EACCES' } }),
+    ])
+    expect(failed.card).toBeUndefined()
   })
 
-  it('honours the page cap instead of re-walking forever', async () => {
-    const events = Array.from({ length: 30 }, (_, i) => ev('assistant/chunk', i, { turn: 1, step: 1 }))
-    const { fetchPage, calls } = pagedLog(events, 5)
-    const result = await collectOwnEvents(fetchPage, 2)
-    expect(calls).toEqual([undefined, 25])
-    expect(result.seedBoundary).toBe(0)
-    expect(result.entries.map(e => e.event.seq)).toEqual([20, 21, 22, 23, 24, 25, 26, 27, 28, 29])
+  it('derives literal diff cards for edit/write calls and refines from the result meta hunks', () => {
+    const edit = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'edit', '{"file_path":"/a.ts","old_string":"x","new_string":"y"}'),
+    ])
+    expect(edit.card).toEqual({ type: 'diff', diffs: [{ path: '/a.ts', oldText: 'x', newText: 'y' }] })
+
+    const write = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'write', '{"file_path":"/new.ts","content":"body"}'),
+    ])
+    expect(write.card).toEqual({ type: 'diff', diffs: [{ path: '/new.ts', oldText: null, newText: 'body' }] })
+
+    const refined = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'edit', '{"file_path":"/a.ts","old_string":"x","new_string":"y"}'),
+      resultRow(2, 'c1', 'ok', { meta: { diffs: [{ path: '/a.ts', oldText: 'x\nctx', newText: 'y\nctx' }] } }),
+    ])
+    expect(refined.card).toEqual({ type: 'diff', diffs: [{ path: '/a.ts', oldText: 'x\nctx', newText: 'y\nctx' }] })
+
+    const malformed = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'edit', '{"file_path":"/a.ts","old_string":"x","new_string":"y"}'),
+      resultRow(2, 'c1', 'ok', { meta: { diffs: [{ path: 7, oldText: 'x', newText: 'y' }] } }),
+    ])
+    // Malformed meta declines to the call-time literal card, never throws.
+    expect(malformed.card).toEqual({ type: 'diff', diffs: [{ path: '/a.ts', oldText: 'x', newText: 'y' }] })
+  })
+
+  it('builds the read card from the result line-window meta and declines malformed windows', () => {
+    const read = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'read', '{"path":"/a.ts","offset":2,"limit":2}'),
+      resultRow(2, 'c1', 'window text', {
+        meta: { path: '/a.ts', offset: 2, lines: [{ number: 2, text: 'b' }, { number: 3, text: 'c' }], totalLines: 5, lang: 'ts' },
+      }),
+    ])
+    expect(read.card).toEqual({
+      type: 'read',
+      label: '/a.ts',
+      lines: [{ number: 2, text: 'b' }, { number: 3, text: 'c' }],
+      totalLines: 5,
+      lang: 'ts',
+    })
+
+    const nonMonotonic = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'read', '{"path":"/a.ts"}'),
+      resultRow(2, 'c1', 'window text', {
+        meta: { path: '/a.ts', offset: 1, lines: [{ number: 3, text: 'c' }, { number: 2, text: 'b' }], totalLines: 5 },
+      }),
+    ])
+    expect(nonMonotonic.card).toBeUndefined()
+  })
+
+  it('leaves unknown tools on the generic row', () => {
+    const row = toolRow([
+      entry(ev('session/end-seed', 0)),
+      callRow(1, 'todo_write', '{"todos":[]}'),
+    ])
+    expect(row.card).toBeUndefined()
+  })
+})
+
+describe('usage formatting', () => {
+  it('formatTokens mirrors the main conversation K/M compaction', () => {
+    expect(formatTokens(517)).toBe('517')
+    expect(formatTokens(999)).toBe('999')
+    expect(formatTokens(1_234)).toBe('1.2K')
+    expect(formatTokens(12_234)).toBe('12.2K')
+    expect(formatTokens(122_345)).toBe('122K')
+    expect(formatTokens(1_234_567)).toBe('1.2M')
+  })
+
+  it('formatDurationMs mirrors the main conversation s / m+s cadence', () => {
+    expect(formatDurationMs(0)).toBe('0s')
+    expect(formatDurationMs(500)).toBe('0.5s')
+    expect(formatDurationMs(45_200)).toBe('45.2s')
+    expect(formatDurationMs(61_000)).toBe('1m1s')
+    expect(formatDurationMs(162_000)).toBe('2m42s')
   })
 })
 

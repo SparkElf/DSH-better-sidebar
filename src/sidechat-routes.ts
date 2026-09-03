@@ -1,6 +1,7 @@
 /**
  * Side Chat routes of the /sidebar JSON API ('sidechat.start' /
- * 'sidechat.prompt' / 'sidechat.cancel' / 'sidechat.dispose').
+ * 'sidechat.prompt' / 'sidechat.cancel' / 'sidechat.dispose' /
+ * 'sidechat.info' / 'sidechat.events').
  *
  * A side thread is a child session the plugin creates ITSELF with a custom
  * seed — the parent's full event log up to the click moment, honestly closed
@@ -43,10 +44,11 @@ import {
   type SeedEvent,
   type SidechatLogEvent,
   type SidechatThreadInfo,
+  threadOwnLogEvents,
 } from './sidechat-core.ts'
 import { requireString, SidebarError } from './wire.ts'
 
-/** The five Side Chat routes of the sidebar API (wire method names). */
+/** The six Side Chat routes of the sidebar API (wire method names). */
 export interface SidechatRoutes {
   /** Create a side thread child seeded with the parent's log up to now.
    *  `question` is optional: empty creates an EMPTY thread (Codex-style
@@ -61,11 +63,21 @@ export interface SidechatRoutes {
   'sidechat.dispose'(payload: unknown): Promise<{ accepted: true }>
   /** Live state + agent identity for the thread header. */
   'sidechat.info'(payload: unknown): Promise<SidechatThreadInfo>
+  /** The thread's OWN transcript events, seed-cut host-side (the inherited
+   *  parent log never crosses the wire); `afterSeq` narrows the response to
+   *  the delta beyond it (poll tail). */
+  'sidechat.events'(payload: unknown): Promise<{ events: SidechatLogEvent[] }>
 }
 
 /** Timeout guarding the create call (the registry detaches it before the
  *  handle becomes visible, so the child is never cancelled by it). */
 const CREATE_TIMEOUT_MS = 15_000
+
+/** Head cap of one `sidechat.events` response (the ceiling the old
+ *  client-side walk could load: 40 pages × 200 events). A pathological
+ *  thread beyond it renders its tail window — the same degradation the
+ *  capped walk had, never a failed poll. */
+const EVENTS_CAP = 8_000
 
 /** Per-activation disposers of created thread agents (the dispose route
  *  releases them; the session and its history always stay persisted). */
@@ -371,6 +383,19 @@ export function buildSidechatApi(ctx: Context): SidechatRoutes {
         }
       }
       return { live: false }
+    },
+
+    'sidechat.events': async (payload: unknown) => {
+      const childId = requireString(payload, 'childId')
+      const rawAfter = (payload as { afterSeq?: unknown }).afterSeq
+      if (rawAfter !== undefined
+        && (typeof rawAfter !== 'number' || !Number.isSafeInteger(rawAfter) || rawAfter < 0)) {
+        throw new SidebarError('bad-request', 'afterSeq must be a non-negative integer')
+      }
+      const events = await threadLogEvents(ctx, childId)
+      const own = threadOwnLogEvents(events)
+      const fresh = rawAfter === undefined ? own : own.filter(event => event.seq > rawAfter)
+      return { events: fresh.length > EVENTS_CAP ? fresh.slice(fresh.length - EVENTS_CAP) : fresh }
     },
   }
 }

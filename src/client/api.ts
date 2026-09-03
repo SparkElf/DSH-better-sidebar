@@ -7,9 +7,9 @@
  * request). Failures surface as {@link SidebarApiError} with the wire code.
  */
 import { encodeHtmlUrl } from '../html-route.ts'
-import { hostRouteUrl } from './host-route-url.ts'
 import type { LastActivity } from '../subagent-activity.ts'
-import type { SidechatThreadInfo } from '../sidechat-core.ts'
+import type { SidechatLogEvent, SidechatThreadInfo } from '../sidechat-core.ts'
+import type { SidebarSessionEvent } from '../context-types.ts'
 import type { BrowserProbeResult } from './browser.ts'
 
 /** One wire failure. */
@@ -20,6 +20,22 @@ export class SidebarApiError extends Error {
   ) {
     super(message)
   }
+}
+
+/**
+ * Whether a wire failure is the workspace fence refusing a path outside the
+ * session workspace (the host message reads `path "..." is outside
+ * workspace`). The request-trust fence answers code `forbidden` with the
+ * bare message 'forbidden', so the message fragment — not the code alone —
+ * identifies this case.
+ */
+export function isOutsideWorkspaceError(error: unknown): boolean {
+  return error instanceof SidebarApiError && isOutsideWorkspaceMessage(error.message)
+}
+
+/** Message-level variant for surfaces that stored the raw text (file-tree level errors). */
+export function isOutsideWorkspaceMessage(message: string): boolean {
+  return message.includes('outside workspace')
 }
 
 /** Explorer row (host fs-tree shape). */
@@ -135,7 +151,7 @@ async function readEnvelope<T>(response: Response): Promise<T> {
 async function call<T>(method: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   let response: Response
   try {
-    response = await fetch(hostRouteUrl(`sidebar/api/${method}`), {
+    response = await fetch(`/sidebar/api/${method}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
@@ -165,7 +181,7 @@ async function fetchUpload<T>(
   if (scope.cwd !== undefined && scope.cwd !== '') params.set('cwd', scope.cwd)
   let response: Response
   try {
-    response = await fetch(hostRouteUrl(`sidebar/upload?${params.toString()}`), {
+    response = await fetch(`/sidebar/upload?${params.toString()}`, {
       method: 'POST',
       headers: { 'content-type': 'application/octet-stream' },
       body,
@@ -291,6 +307,14 @@ export const api = {
   /** Full patch text of one commit (diff display for the history rows). */
   gitCommitDiff: (scope: SessionScope, hash: string, worktree?: string, signal?: AbortSignal) =>
     call<{ diff: string }>('git.commit-diff', gitPayload(scope, worktree, { hash }), signal),
+  /** The session's file-tool events for the changes tab's session lens: the
+   *  `tool/call` + `tool/result` rows past `afterSeq` (0 = whole window),
+   *  capped to the recent window host-side. The client runtime exposes no
+   *  event-log face, so the lens polls this delta route. */
+  changesOps: (scope: SessionScope, afterSeq?: number, signal?: AbortSignal) =>
+    call<{ events: SidebarSessionEvent[]; lastSeq: number }>('changes.ops', scopePayload(scope, {
+      ...(afterSeq !== undefined && afterSeq > 0 ? { afterSeq } : {}),
+    }), signal),
   /** Discard the worktree changes of one file (the index is untouched). */
   gitDiscard: (scope: SessionScope, path: string, worktree?: string) =>
     call<{ ok: true }>('git.discard', gitPayload(scope, worktree, { path })),
@@ -350,6 +374,14 @@ export const api = {
   /** Live state + agent identity (provider/model/preset) of a thread. */
   sidechatInfo: (childId: string) =>
     call<SidechatThreadInfo>('sidechat.info', { childId }),
+  /** One transcript pull of a Side Chat thread: the thread's OWN events
+   *  (the inherited seed is cut host-side and never crosses the wire).
+   *  `afterSeq` narrows the response to the delta beyond it (poll tail). */
+  sidechatEvents: (childId: string, afterSeq?: number, signal?: AbortSignal) =>
+    call<{ events: SidechatLogEvent[] }>('sidechat.events', {
+      childId,
+      ...(afterSeq !== undefined ? { afterSeq } : {}),
+    }, signal),
   /** The effective terminal shell and its display name (plugin-global). */
   shellGet: () =>
     call<{ shell: string; name: string }>('shell.get', {}),
@@ -388,7 +420,7 @@ function fileUrl(scope: SessionScope, path: string, download: boolean): string {
   const params = new URLSearchParams({ sessionId: scope.sessionId, path })
   if (scope.cwd !== undefined && scope.cwd !== '') params.set('cwd', scope.cwd)
   if (download) params.set('download', '1')
-  return hostRouteUrl(`sidebar/file?${params.toString()}`).href
+  return `/sidebar/file?${params.toString()}`
 }
 
 /**
@@ -400,5 +432,5 @@ function fileUrl(scope: SessionScope, path: string, download: boolean): string {
  * client-side platform signal is needed.
  */
 export function htmlUrl(scope: SessionScope, path: string): string {
-  return hostRouteUrl(encodeHtmlUrl(scope.sessionId, path)).href
+  return encodeHtmlUrl(scope.sessionId, path)
 }

@@ -306,39 +306,6 @@ export interface SidebarSessionPersistenceService {
   }>
 }
 
-/** RPC result slot mirror (`RpcResult<T>` on the wire). */
-export type SidebarRpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-/** Unary response mirror (`RpcResponse<T>` on the wire). */
-export interface SidebarRpcResponse<T> {
-  rpcId: unknown
-  result: SidebarRpcResult<T>
-}
-
-/** The generic session-history RPC face the Side Chat transcript polls
- *  (subagent.history verifies subagent-catalog membership, which our custom
- *  side-thread children do not have — the generic session.history reads any
- *  durable log directly). */
-export interface SidebarSessionHistoryRpc {
-  history(
-    payload: { sessionId: string; beforeSeq?: number; maxMessages?: number },
-    signal?: AbortSignal,
-  ): Promise<SidebarRpcResponse<{ events: SidebarHistoryEntry[]; hasMore: boolean }>>
-}
-
-/** The wire face the Subagent activity summary needs (subset of `ctx.connection`). */
-export interface SidebarConnectionHandle {
-  api: {
-    sessions: SidebarSessionHistoryRpc
-    subagents: {
-      history(
-        payload: SidebarSubagentAddress & { beforeSeq?: number; maxMessages?: number },
-        signal?: AbortSignal,
-      ): Promise<SidebarRpcResponse<{ events: SidebarHistoryEntry[]; hasMore: boolean }>>
-    }
-  }
-}
-
 /** The client session list snapshot the sidebar subscribes to. */
 export interface SidebarSessionList {
   current: string | undefined
@@ -543,8 +510,6 @@ export interface SidebarContextShape {
   webServer: SidebarWebServer
   /** The session store (host `.get`) and the client list feed (`.list`) faces. */
   sessions: SidebarSessionStore & SidebarSessionsService
-  /** The wire handle the Side Chat transcript polls through. */
-  connection: SidebarConnectionHandle
   /** The web runtime trust list (bind-derived). */
   webRuntime: SidebarWebRuntime
   /** The client slot registry (register/inject). */
@@ -571,6 +536,19 @@ export interface SidebarContextShape {
   sessionTitle: SidebarSessionTitleService
   /** The host session-persistence service (optional; side chat cold resume). */
   sessionPersistence: SidebarSessionPersistenceService
+  /**
+   * The client connection lifecycle (DSH 0.1.2-alpha.2+; optional so older
+   * hosts and test fakes simply hide the disconnect banner): the observable
+   * recovery state of the Remote transport (`undefined` before the first
+   * connection outcome) and an immediate-reconnect request.
+   */
+  connection?: {
+    state: {
+      getSnapshot(): 'connected' | 'disconnected' | 'connecting' | undefined
+      subscribe(listener: () => void): () => void
+    }
+    reconnect(): void
+  }
   /** The composer draft face (client ui-conversation, lazy `ctx.get` probe). */
   conversation: SidebarConversation
   /**

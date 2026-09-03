@@ -19,6 +19,7 @@ import { createElement, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ComponentType } from 'react'
+import { markdownTextProps } from './markdown-labels.tsx'
 import { lazyChunkComponent } from './lazy-chunk.tsx'
 import { resolveLocalMediaDest } from './markdown-images.ts'
 import {
@@ -40,7 +41,7 @@ export const LazyMermaidMarkdown = lazyChunkComponent<MermaidMarkdownProps>(
 export interface MarkdownHtmlMedia {
   scope: SessionScope
   path: string
-  baseUrl: string
+  origin: string
 }
 
 /** Tag-like text in a rendered text node — the inline pass gate. */
@@ -67,7 +68,7 @@ function postProcessSanitized(root: Element, media: MarkdownHtmlMedia): void {
   for (const element of root.querySelectorAll('img, video, audio, source')) {
     const src = element.getAttribute('src')
     if (src === null) continue
-    element.setAttribute('src', resolveLocalMediaDest(src, media.scope, media.path, media.baseUrl))
+    element.setAttribute('src', resolveLocalMediaDest(src, media.scope, media.path, media.origin))
   }
 }
 
@@ -193,7 +194,7 @@ function MarkdownSegment({ text, hasMermaid, media, codeLabels }: MarkdownSegmen
     <div ref={containerRef}>
       {hasMermaid
         ? <LazyMermaidMarkdown text={text} codeLabels={codeLabels} />
-        : <MarkdownText text={text} codeLabels={codeLabels} />}
+        : <MarkdownText {...markdownTextProps(text, codeLabels)} />}
     </div>
   )
 }
