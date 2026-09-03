@@ -281,7 +281,7 @@ All changes since v0.17.1 (the two intermediate version numbers v0.18.1-alpha.0 
 
 - 🌿 **Unified "Changes" tab** (#475): one tab, two lenses — Git (real diff / history / stage·commit·revert / worktree & child-repo selection) and This Session (live tracking of every file the model reads / writes / edits); a unified diff renderer (mod pairing + intra-line character highlights + syntax coloring + context folding), a draggable bottom preview pane, and one-click expansion into a dedicated diff tab
 - 💬 **Side Chat rendering upgrade** (#486): main-conversation-grade Blocks structure, per-turn usage tails, reconnect banner
-- ⚙️ **Workspace path fence toggle** (#458): a new `workspaceFence` declarative settings key with a one-click off affordance and guidance on 403 error surfaces
+- ⚙️ **Workspace fence and external previews**: `workspaceFence` still protects tree browsing, save, rename, delete, and upload operations; explicitly opened absolute files may be previewed read-only outside the workspace (text, media, and HTML), with clear filesystem errors for missing or unreadable files
 
 **⚡ Performance**
 
