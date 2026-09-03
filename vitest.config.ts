@@ -14,6 +14,9 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
+    // Windows fork workers intermittently exit under full-suite CI pressure.
+    // One worker keeps the real ConPTY coverage deterministic within the job budget.
+    maxWorkers: process.platform === 'win32' ? 1 : undefined,
     server: {
       deps: {
         inline: [/@deepseek-ai\/dsh-client-ui-primitives/],
