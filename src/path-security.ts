@@ -43,6 +43,15 @@ export async function ensureWorkspacePath(cwd: string, target: string, fence = t
 }
 
 /**
+ * Resolve one existing file selected for read-only preview. Explicit absolute
+ * files may live outside the session workspace; canonicalization and readable
+ * filesystem errors remain identical to workspace-scoped reads.
+ */
+export async function ensurePreviewPath(cwd: string, target: string): Promise<string> {
+  return ensureWorkspacePath(cwd, target, false)
+}
+
+/**
  * Validate a write destination, including destinations that do not exist yet.
  * Existing targets are resolved to catch symlinks; missing targets are checked
  * against the nearest existing ancestor before the caller creates or renames.
