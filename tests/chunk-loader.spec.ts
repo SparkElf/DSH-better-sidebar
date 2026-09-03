@@ -8,9 +8,10 @@
  * - externals resolve through the module system's seed branch (the stable,
  *   version-independent part), once per page,
  * - resetChunks drops the cache and the externals memo (HMR).
- * The production path runs against a fake `window.__DSH_MODULES__` and a
- * stub script loader that simulates the executed chunk script by assigning
- * the plugin-owned global factory registry.
+ * The production path runs against a fake module system injected via
+ * {@link setChunkModuleSystem} (mirroring the client half's `ctx.modules`
+ * injection) and a stub script loader that simulates the executed chunk
+ * script by assigning the plugin-owned global factory registry.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import './browser-globals.ts'
@@ -33,17 +34,8 @@ function installModuleSystem(): FakeModuleSystem {
   const fake: FakeModuleSystem = {
     import: vi.fn(async (specifier: string) => ({ seed: specifier })),
   }
-  ;(globalThis as Record<string, unknown>).__DSH_MODULES__ = fake
+  setChunkModuleSystem(fake)
   return fake
-}
-
-function removeModuleSystem(): void {
-  delete (globalThis as Record<string, unknown>).__DSH_MODULES__
-}
-
-/** The global registry the chunk scripts populate (mirror of chunk-loader). */
-function registry(): Record<string, unknown> {
-  return (globalThis as { __dshChunks__?: Record<string, unknown> }).__dshChunks__ ?? {}
 }
 
 /** Simulate a chunk script executing: it assigns its factory to the registry. */
@@ -54,7 +46,6 @@ function simulateScript(name: string, factory: (require: (spec: string) => unkno
 }
 
 beforeEach(() => {
-  removeModuleSystem()
   setChunkModuleSystem(undefined)
   delete (globalThis as Record<string, unknown>).__dshChunks__
   resetChunks()
@@ -94,16 +85,13 @@ describe('test-registry path (vitest / jsdom-less environments)', () => {
 describe('production path (script injection + global registry + externals require)', () => {
   it('resolves externals through an injected ctx.modules system (rc.8 — no page global)', async () => {
     const modules = installModuleSystem()
-    // rc.8 drops window.__DSH_MODULES__; the client half injects ctx.modules.
-    removeModuleSystem()
-    setChunkModuleSystem(modules)
     const loaded: string[] = []
     setChunkScriptLoaderForTests(async (src) => {
       loaded.push(src)
       simulateScript('editor', (require) => ({ TextEditor: `view:${String(require('react'))}` }))
     })
     const exports = await loadChunk('editor')
-    expect(loaded).toEqual(['http://localhost/sidebar/bundle/editor.js'])
+    expect(loaded).toEqual(['/sidebar/bundle/editor.js'])
     expect(exports).toEqual({ TextEditor: 'view:[object Object]' })
     expect(modules.import).toHaveBeenCalledTimes(CHUNK_EXTERNALS.length)
     // The injection also lands on a plugin-owned global so chunk-bundle
@@ -128,7 +116,7 @@ describe('production path (script injection + global registry + externals requir
       simulateScript('editor', (require) => ({ TextEditor: `view:${String(require('react'))}` }))
     })
     const exports = await loadChunk('editor')
-    expect(loaded).toEqual(['http://localhost/sidebar/bundle/editor.js'])
+    expect(loaded).toEqual(['/sidebar/bundle/editor.js'])
     expect(exports).toEqual({ TextEditor: 'view:[object Object]' })
     // Externals resolved through the module system's seed branch, once.
     expect(modules.import).toHaveBeenCalledTimes(CHUNK_EXTERNALS.length)
@@ -147,7 +135,7 @@ describe('production path (script injection + global registry + externals requir
     })
     await loadChunk('terminal')
     await loadChunk('editor')
-    expect(seen).toEqual(['http://localhost/sidebar/bundle/terminal.js', 'http://localhost/sidebar/bundle/editor.js'])
+    expect(seen).toEqual(['/sidebar/bundle/terminal.js', '/sidebar/bundle/editor.js'])
     expect(modules.import).toHaveBeenCalledTimes(CHUNK_EXTERNALS.length)
   })
 
@@ -237,10 +225,8 @@ describe('revalidateChunksOnReactivate (HMR re-activation keeps unchanged chunks
     }))
   }
 
-  /** Wait until the fire-and-forget ETag recorder has issued its HEAD request. */
-  const settleEtag = async (): Promise<void> => {
-    await vi.waitFor(() => { expect(vi.mocked(globalThis.fetch)).toHaveBeenCalled() })
-  }
+  /** Let the fire-and-forget ETag recorder (recordEtag) settle. */
+  const settleEtag = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 5))
 
   it('keeps the resolved exports of an unchanged chunk — no re-inject / re-execute', async () => {
     installModuleSystem()
@@ -316,8 +302,7 @@ describe('revalidateChunksOnReactivate (HMR re-activation keeps unchanged chunks
     const revalidating = revalidateChunksOnReactivate()
     // A lazy open DURING the pending revalidation must NOT get the old cache.
     let resolved = false
-    let pendingLoad: Promise<ChunkExports> | null = null
-    pendingLoad = loadChunk('editor').then((exports) => { resolved = true; return exports })
+    const pendingLoad = loadChunk('editor').then((exports) => { resolved = true; return exports })
     await new Promise((resolve) => setTimeout(resolve, 5))
     expect(resolved, 'loadChunk must await the pending revalidation').toBe(false)
     // Release the HEAD; the barrier lifts and the load re-injects fresh exports.
@@ -371,7 +356,7 @@ describe('revalidateChunksOnReactivate (HMR re-activation keeps unchanged chunks
       scriptCalls += 1
       simulateScript('editor', () => ({ TextEditor: `editor-view:${scriptCalls}` }))
     })
-    let etag = '"v1"'
+    const etag = '"v1"'
     stubBundleHead(() => etag)
     await loadChunk('editor')
     await settleEtag()
@@ -419,7 +404,6 @@ describe('externals contract', () => {
       'cordis',
       '@deepseek-ai/dsh-client-ui-slots',
       '@deepseek-ai/dsh-client-ui-primitives',
-      '@deepseek-ai/dsh-client-runtime/client',
     ])
   })
 })

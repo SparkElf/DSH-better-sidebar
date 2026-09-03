@@ -4,7 +4,7 @@
 
 ## 问题
 
-0.1.2-alpha.x 宿主上，聊天里点击文件链接（工具行、产物行、正文行内代码路径）直接落到系统默认应用（Linux 即 `xdg-open`），「聊天区文件在侧边栏打开」（`interceptOpenPath`，显式开启后生效）形同虚设。
+0.1.2-alpha.x 宿主上，聊天里点击文件链接（工具行、产物行、正文行内代码路径）直接落到系统默认应用（Linux 即 `xdg-open`），「聊天区文件在侧边栏打开」（`interceptOpenPath`，默认开）形同虚设。
 
 **根因**：alpha 架构把聊天打开文件的漏斗从客户端服务换成了远程调用——`ui-chat/src/client/apply.ts` 注入 ChatView 的 `openFile` 直连 `ctx.remote.session.openWorkspacePath({ path })` → 宿主 `session-controller` → `openNativePath`。插件的 `wrapOpenPath` 包的是旧漏斗 `ctx.workspaces.openPath`，而 alpha 的 `IWorkspaces`（`api/workspace-controller/src/client/service.ts`）**已删除 `openPath` 方法**——wrap 只是给 service 实例挂了个永无调用方的新属性，死代码。这是 #435/#472 适配的漏网项（挂载冒烟不点聊天文件链接，抓不到）。
 
@@ -39,7 +39,7 @@ Object.defineProperty(service, 'openWorkspacePath', {
 // dispose：descriptor 存在则原样 defineProperty 恢复，否则 delete —— HMR 安全
 ```
 
-- **接管语义不变**（复用现有 deps）：`!suspended && interceptOpenPath === true && tabsEnabled.editor !== false && 有 current session及非空cwd`；`isFolderRevealPath` → `revealInExplorer`；其余 → `openInSidebar`（`:line` 拆分在既有链路内，#158 功能随之恢复）。
+- **接管语义不变**（复用现有 deps）：`!suspended && interceptOpenPath !== false && tabsEnabled.editor !== false && 有 current session`；`isFolderRevealPath` → `revealInExplorer`；其余 → `openInSidebar`（`:line` 拆分在既有链路内，#158 功能随之恢复）。
 - **进入时机**：`registerOpenPathInterception` 改为 `ctx.inject(['remote.session'], ...)` 内包装；宿主裁掉该服务时回调永不触发 = 不拦截不报错。
 - **已知取舍**：包装期间若 contribution 重挂方法记录，捕获的 `original` 闭包指向旧记录（getter 访问期绑定语义决定）；session 命名空间实际常驻，可接受，代码注释记录。
 
@@ -58,7 +58,7 @@ Object.defineProperty(service, 'openWorkspacePath', {
 ## 验证
 
 - 单测：接管 / 放行 / 文件夹揭示手势三态；dispose 恢复原 descriptor；inject 延迟出现。
-- 门禁：`pnpm typecheck` → `pnpm test` → `pnpm build` → `pnpm test:mount`（默认关闭拦截时真机 mount不回归；显式开启后的拦截正确性由单测 + 手测覆盖）。
+- 门禁：`pnpm typecheck` → `pnpm test` → `pnpm build` → `pnpm test:mount`（alpha.2 真机 14/14 不回归；mount lane 不驱动聊天点击，拦截正确性靠单测 + 手测）。
 - 真机手测：让模型在回复里输出一个工作区文件路径（行内代码）→ 点击落侧边栏编辑器；关闭「聊天区文件在侧边栏打开」后点击 → 系统默认应用；`path:line` 链接 → 侧边栏跳行（#158 回归）。
 
 ## 实施偏差记录

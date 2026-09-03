@@ -37,12 +37,17 @@ import { FitAddon } from '@xterm/addon-fit'
 import { writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import '@xterm/xterm/css/xterm.css'
 import { t } from './locales.ts'
+import { ONE_DARK, ONE_LIGHT } from './one-dark-palette.ts'
 import { openWhenSized } from './open-when-sized.ts'
 import { api, type SessionScope, type TerminalDepsStatus } from './api.ts'
 import { agentUuidOf, isAgentTabId, type SidebarStore } from './state.ts'
 import { isDarkScheme, subscribeColorScheme, effectiveTokenValue, tokenValue } from './theme.ts'
 import { resolveTerminalFont } from './terminal-font.ts'
-import { hostWebSocketUrl } from './host-route-url.ts'
+import {
+  buildTerminalLinks,
+  shouldActivateTerminalLink,
+  openTerminalUrl,
+} from './terminal-links.ts'
 import css from './sidebar.module.css'
 
 /** How many consecutive unreasoned failures before showing the error banner. */
@@ -63,24 +68,24 @@ type TerminalDepsInfo = Extract<TerminalDepsStatus, { ok: false }>
  * Curated ANSI palettes for the terminal. The surface colors (background,
  * foreground, cursor, selection) ride the theme tokens so the terminal
  * blends with the panel in both schemes; the 16 ANSI colors are the same
- * designed palettes the app's code surfaces use (one-dark family for dark,
- * one-light family for light), read live so a scheme flip re-themes in
- * place.
+ * designed syntax families the app's code surfaces use — one-dark for
+ * dark, one-light for light (one-dark-palette.ts, shared with the
+ * CodeMirror themes) — read live so a scheme flip re-themes in place.
  */
 const ANSI_DARK: Record<string, string> = {
-  black: '#282c34', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
-  blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#abb2bf',
-  brightBlack: '#5c6370', brightRed: '#e06c75', brightGreen: '#98c379',
-  brightYellow: '#e5c07b', brightBlue: '#61afef', brightMagenta: '#c678dd',
-  brightCyan: '#56b6c2', brightWhite: '#ffffff',
+  black: ONE_DARK.black, red: ONE_DARK.red, green: ONE_DARK.green, yellow: ONE_DARK.yellow,
+  blue: ONE_DARK.blue, magenta: ONE_DARK.magenta, cyan: ONE_DARK.cyan, white: ONE_DARK.gray,
+  brightBlack: ONE_DARK.faintGray, brightRed: ONE_DARK.red, brightGreen: ONE_DARK.green,
+  brightYellow: ONE_DARK.yellow, brightBlue: ONE_DARK.blue, brightMagenta: ONE_DARK.magenta,
+  brightCyan: ONE_DARK.cyan, brightWhite: ONE_DARK.white,
 }
 
 const ANSI_LIGHT: Record<string, string> = {
-  black: '#383a42', red: '#e45649', green: '#50a14f', yellow: '#c18401',
-  blue: '#0184bc', magenta: '#a626a4', cyan: '#0997b3', white: '#a0a1a7',
-  brightBlack: '#4f525e', brightRed: '#e45649', brightGreen: '#50a14f',
-  brightYellow: '#c18401', brightBlue: '#0184bc', brightMagenta: '#a626a4',
-  brightCyan: '#0997b3', brightWhite: '#fafafa',
+  black: ONE_LIGHT.black, red: ONE_LIGHT.red, green: ONE_LIGHT.green, yellow: ONE_LIGHT.yellow,
+  blue: ONE_LIGHT.blue, magenta: ONE_LIGHT.magenta, cyan: ONE_LIGHT.cyan, white: ONE_LIGHT.gray,
+  brightBlack: ONE_LIGHT.faintGray, brightRed: ONE_LIGHT.red, brightGreen: ONE_LIGHT.green,
+  brightYellow: ONE_LIGHT.yellow, brightBlue: ONE_LIGHT.blue, brightMagenta: ONE_LIGHT.magenta,
+  brightCyan: ONE_LIGHT.cyan, brightWhite: ONE_LIGHT.offWhite,
 }
 
 /** The xterm theme for the current scheme (surface from tokens, ANSI curated). */
@@ -130,6 +135,41 @@ export function TerminalView(props: { scope: SessionScope; tabId: string; store:
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
+    // Ctrl+Click (Cmd+Click on mac) opens http(s) URLs printed in the
+    // pty stream — a plain click is left for xterm's text-selection
+    // gesture. Only http(s) is dispatched; file:// / mailto: / etc. are
+    // underlined for visibility but rejected at activation. See
+    // terminal-links.ts for the line scanner, modifier gate and scheme
+    // guard.
+    const linkProvider = term.registerLinkProvider({
+      provideLinks: (lineNumber, callback) => {
+        // xterm's `provideLinks` hands us a 1-based buffer line number
+        // (its own built-in ILinkProvider does `buffer.lines.get(e - 1)`,
+        // i.e. the public `bufferLineNumber` is 1-based while `getLine`
+        // takes a 0-based index). Passing `lineNumber` straight through
+        // would fetch the row *below* the one xterm asked us to scan, so
+        // the URL text would come from the wrong row while `range.y` still
+        // pointed at the requested row — links landed one line too high.
+        const line = term.buffer.active.getLine(lineNumber - 1)
+        if (line === undefined) {
+          callback(undefined)
+          return
+        }
+        const descriptors = buildTerminalLinks(line.translateToString(true), lineNumber)
+        if (descriptors.length === 0) {
+          callback(undefined)
+          return
+        }
+        callback(descriptors.map(descriptor => ({
+          range: descriptor.range,
+          text: descriptor.text,
+          activate: (event) => {
+            if (!shouldActivateTerminalLink(event)) return
+            openTerminalUrl(descriptor.text)
+          },
+        })))
+      },
+    })
     // Re-theme in place when the app's scheme flips (tokens + palette).
     const applyTheme = (): void => {
       term.options.theme = xtermTheme()
@@ -143,7 +183,8 @@ export function TerminalView(props: { scope: SessionScope; tabId: string; store:
     let failures = 0
 
     const wsUrl = (): string => {
-      const url = hostWebSocketUrl('sidebar/ws/terminal')
+      const url = new URL('/sidebar/ws/terminal', location.origin)
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
       // Agent terminals attach by uuid (the host looks them up in the agent
       // pty registry); UI-tab terminals attach by sessionId+tab (the host
       // uses the UI-tab pty manager). Same upgrade endpoint, different query.
@@ -154,7 +195,9 @@ export function TerminalView(props: { scope: SessionScope; tabId: string; store:
         if (scope.cwd !== undefined && scope.cwd !== '') params.set('cwd', scope.cwd)
         url.search = params.toString()
       }
-      // The injected document base keeps the socket under the same reverse-proxy prefix as the page.
+      // Same construction the app's own downlink WebSockets use (new URL
+      // over location.origin + protocol swap): whatever the environment
+      // does to the app's websockets applies identically here.
       return url.toString()
     }
 
@@ -226,13 +269,23 @@ export function TerminalView(props: { scope: SessionScope; tabId: string; store:
     const inputSub = term.onData((data) => {
       if (socket !== null && socket.readyState === WebSocket.OPEN) socket.send(data)
     })
+    // Resize streams fire per layout frame during panel open/close
+    // animations; fit() measures glyphs, so coalesce to one fit per
+    // animation frame (same pattern as the core's frame-batcher, kept
+    // local — this view lives in the lazy terminal chunk and does not
+    // import core-bundle modules).
+    let resizeFrame: number | null = null
     const observer = new ResizeObserver(() => {
-      try {
-        fit.fit()
-        sendResize()
-      } catch {
-        // The terminal may be mid-dispose; ignore.
-      }
+      if (resizeFrame !== null) return
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null
+        try {
+          fit.fit()
+          sendResize()
+        } catch {
+          // The terminal may be mid-dispose; ignore.
+        }
+      })
     })
     observer.observe(host)
 
@@ -281,6 +334,7 @@ export function TerminalView(props: { scope: SessionScope; tabId: string; store:
       cancelOpen()
       window.clearTimeout(retry)
       observer.disconnect()
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
       fontSub()
       schemeSub()
       inputSub.dispose()
@@ -311,6 +365,7 @@ export function TerminalView(props: { scope: SessionScope; tabId: string; store:
         socket.send(JSON.stringify({ type: 'park' }))
       }
       socket?.close()
+      linkProvider.dispose()
       term.dispose()
       connectRef.current = null
     }

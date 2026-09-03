@@ -18,7 +18,7 @@ import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocket, WebSocketServer } from 'ws'
-import type { Context, SidebarHttpRequest } from './context-types.ts'
+import type { Context, SidebarHttpRequest, SidebarSessionEvent } from './context-types.ts'
 import {
   Config,
   PrefsSchema,
@@ -30,6 +30,7 @@ import {
   type SidebarPrefs,
 } from './config.ts'
 import { parentOf, requireAbsolute, listDirectory, rootLabel } from './fs-tree.ts'
+import { resolveSessionPath } from './session-path.ts'
 import { writeWorkspaceUpload } from './fs-operations.ts'
 import { ensureWorkspacePath, ensureWorkspaceWritePath } from './path-security.ts'
 import { searchFiles } from './fs-search.ts'
@@ -39,9 +40,9 @@ import { isTrustedApiRequest, isLoopbackHostname } from './trust-fence.ts'
 import { registerBundleRoute } from './bundle-route.ts'
 import { launchExternal } from './open-external.ts'
 import * as git from './git.ts'
-import { SettingsConflictError, settingsNamespace, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import { SettingsConflictError } from '@deepseek-ai/dsh-settings'
 import { defaultShell, ensureSpawnHelper, PtyManager, shellDisplayName } from './pty-manager.ts'
-import { AgentPtyRegistry, clampDims, type AgentTerminalHandle } from './agent-pty.ts'
+import { AgentPtyRegistry, armPtyResizeGate, tryResizePty, type AgentTerminalHandle } from './agent-pty.ts'
 import {
   DSH_NODE_PTY_RANGE,
   depsStatus,
@@ -105,12 +106,17 @@ export function mediaTypeForPath(path: string): string {
  * header wins; while the session is still hydrating from persistence (the
  * web client attaches the current conversation a moment after page load, so
  * the very first sidebar requests can arrive detached) the caller's own
- * list-summary cwd is used; the process cwd is the last resort (blank
- * sessions have no cwd anywhere yet). Never throws for a missing cwd, so
- * explorer/git/terminal work from first paint instead of surfacing
- * "session ... has no working directory".
+ * list-summary cwd is used; the session-persistence index is queried as a
+ * last resort for cold (not-yet-attached) sessions so a detached first
+ * request still resolves the correct project instead of the host process
+ * cwd (which on Windows is the DSH source root after `dsh.cmd`'s `pushd`,
+ * causing every user-project path to be misclassified as "outside
+ * workspace"). The host process cwd is the FINAL fallback for deployments
+ * without persistence (tests / stripped-down hosts); production always
+ * provides persistence, so the bug-fix path (header → client → persistence)
+ * always resolves the real session cwd before reaching it.
  */
-function sessionCwdOf(ctx: Context, sessionId: string, clientCwd?: string): string {
+async function sessionCwdOf(ctx: Context, sessionId: string, clientCwd?: string): Promise<string> {
   const session = ctx.sessions.get(sessionId)
   const headerCwd = session?.header.cwd
   if (headerCwd !== undefined && headerCwd !== '') return headerCwd
@@ -119,6 +125,18 @@ function sessionCwdOf(ctx: Context, sessionId: string, clientCwd?: string): stri
       return requireAbsolute(clientCwd)
     } catch {
       throw new SidebarError('bad-request', `invalid working directory "${clientCwd}"`)
+    }
+  }
+  const persistence = ctx.get('sessionPersistence')
+  if (persistence !== undefined) {
+    const inspected = await persistence.inspect(sessionId)
+    const metaCwd = inspected.meta.cwd
+    if (metaCwd !== undefined && metaCwd !== '') {
+      try {
+        return requireAbsolute(metaCwd)
+      } catch {
+        throw new SidebarError('bad-request', `invalid working directory "${metaCwd}"`)
+      }
     }
   }
   return process.cwd()
@@ -139,7 +157,7 @@ function selectedRepoOf(payload: unknown): string | undefined {
  * cwd when the root cannot be resolved, e.g. a bare directory).
  */
 async function resolveGitPath(cwd: string, raw: string, selected?: string): Promise<string> {
-  if (isAbsolute(raw)) return requireAbsolute(raw)
+  if (isAbsolute(raw)) return requireAbsolute(resolveSessionPath(cwd, raw))
   // Prefer the session-relative interpretation when it names an existing
   // path. Git status reports repository-root-relative names, but the sidebar
   // security boundary is the session workspace; this preference keeps files
@@ -241,6 +259,19 @@ function shellOverridesOf(getSettings: () => SidebarSettingsFace | undefined): {
 }
 
 /**
+ * Whether the workspace fence is armed for the sidebar's filesystem routes
+ * (the settings-page `workspaceFence` switch under the files card's gear).
+ * An absent settings service or a missing field keeps the fence ON — the
+ * containment default never depends on the settings surface being reachable.
+ */
+function fenceEnabledOf(getSettings: () => SidebarSettingsFace | undefined): boolean {
+  const settings = getSettings()
+  const value = settings?.get().value
+  if (value === null || typeof value !== 'object') return true
+  return (value as Record<string, unknown>).workspaceFence !== false
+}
+
+/**
  * Parse the browser tab's `browserAllowedLoopback` allowlist into a matcher
  * over host:port (same contract as the client-side helper in
  * src/client/browser.ts — kept in sync). Bare hosts (`localhost`,
@@ -268,16 +299,16 @@ function buildApi(
   terminalShell: string,
   getSettings: () => SidebarSettingsFace | undefined,
 ): Record<string, ApiMethod> {
-  const cwdOf = (payload: unknown): { sessionId: string; cwd: string } => {
+  const cwdOf = async (payload: unknown): Promise<{ sessionId: string; cwd: string }> => {
     const sessionId = requireString(payload, 'sessionId')
     const record = payload as { cwd?: unknown } | null
     const clientCwd = typeof record?.cwd === 'string' && record.cwd !== '' ? record.cwd : undefined
-    return { sessionId, cwd: sessionCwdOf(ctx, sessionId, clientCwd) }
+    return { sessionId, cwd: await sessionCwdOf(ctx, sessionId, clientCwd) }
   }
   /** Resolve the optional Git-panel checkout selector against the authoritative
    * session repository. Unlike `cwd`, `worktree` is never trusted directly. */
   const gitCwdOf = async (payload: unknown): Promise<{ sessionId: string; cwd: string }> => {
-    const base = cwdOf(payload)
+    const base = await cwdOf(payload)
     const record = payload as { worktree?: unknown } | null
     const requested = typeof record?.worktree === 'string' && record.worktree !== '' ? record.worktree : undefined
     return { sessionId: base.sessionId, cwd: await git.resolveWorktree(base.cwd, requested) }
@@ -293,39 +324,39 @@ function buildApi(
   // subagent runtime is absent (the page has no topology to show anyway).
   const subagentLiveApi: SidebarSubagentLiveRoutes = buildSubagentLiveApi(ctx)
   return {
-    'session.cwd': (payload) => {
-      const { sessionId, cwd } = cwdOf(payload)
+    'session.cwd': async (payload) => {
+      const { sessionId, cwd } = await cwdOf(payload)
       return { sessionId, cwd, root: rootLabel(cwd), parent: parentOf(cwd) ?? null }
     },
     'fs.tree': async (payload) => {
-      const { cwd } = cwdOf(payload)
+      const { cwd } = await cwdOf(payload)
       const record = payload as { path?: unknown }
-      const target = record.path === undefined ? cwd : await ensureWorkspacePath(cwd, requireString(payload, 'path'))
+      const target = record.path === undefined ? cwd : await ensureWorkspacePath(cwd, requireString(payload, 'path'), fenceEnabledOf(getSettings))
       return listDirectory(target, resolved.listLimit)
     },
     'fs.search': async (payload) => {
       // The editor side panel's global name search: rooted at the session
       // cwd (not caller-targetable — the walk is unbounded by design and
       // must never escape the workspace), budgeted inside searchFiles.
-      const { cwd } = cwdOf(payload)
+      const { cwd } = await cwdOf(payload)
       const query = requireString(payload, 'query')
       return searchFiles(cwd, query)
     },
     'fs.read': async (payload) => {
-      const { cwd } = cwdOf(payload)
+      const { cwd } = await cwdOf(payload)
       // Relative paths are git-derived (status/diff report repo-root-relative
       // names; the untracked diff view reads the file through this route). A
       // child-repo path is relative to the selected repoRoot, not the session
       // cwd; thread it so the path resolves inside the authorized workspace.
       const selected = selectedRepoOf(payload)
-      const path = await ensureWorkspacePath(cwd, await resolveGitPath(cwd, requireString(payload, 'path'), selected))
+      const path = await ensureWorkspacePath(cwd, await resolveGitPath(cwd, requireString(payload, 'path'), selected), fenceEnabledOf(getSettings))
       const { content, truncated, binary, size, head } = await readText(path, resolved.readLimit)
       if (binary) return { kind: 'binary', size, truncated, head }
       return { kind: 'text', content, truncated }
     },
     'fs.write': async (payload) => {
-      const { cwd } = cwdOf(payload)
-      const path = await ensureWorkspaceWritePath(cwd, requireString(payload, 'path'))
+      const { cwd } = await cwdOf(payload)
+      const path = await ensureWorkspaceWritePath(cwd, requireString(payload, 'path'), fenceEnabledOf(getSettings))
       const content = requireString(payload, 'content')
       const tmp = `${path}.dsh-sidebar-tmp-${process.pid}`
       try {
@@ -424,6 +455,44 @@ function buildApi(
       const path = await resolveGitPath(cwd, requireString(payload, 'path'), repoRoot)
       const rev = requireString(payload, 'rev')
       return { content: await git.show(cwd, rev, path, repoRoot) }
+    },
+    // The session's file-tool events for the changes tab's session lens
+    // (and its badge): the CLIENT runtime's sessions face has no event-log
+    // access, so the events cross the wire here — live session log first,
+    // the persisted logical log for not-yet-hydrated sessions. Only the
+    // two event types the lens folds are sent, narrowed to `seq > afterSeq`
+    // so polling is a small delta, with the same recent-window cap the
+    // client accumulator applies.
+    'changes.ops': async (payload) => {
+      const sessionId = requireString(payload, 'sessionId')
+      const rawAfter = (payload as { afterSeq?: unknown } | null)?.afterSeq
+      if (rawAfter !== undefined
+        && (typeof rawAfter !== 'number' || !Number.isSafeInteger(rawAfter) || rawAfter < 0)) {
+        throw new SidebarError('bad-request', 'afterSeq must be a non-negative integer')
+      }
+      // An absent cursor means "from the very first event" — a session whose
+      // log opens on a tool event (subagent seeds do) carries seq 0, which a
+      // literal `> 0` comparison would drop, so the absent case floors at -1.
+      const afterSeq = rawAfter ?? -1
+      let events: readonly SidebarSessionEvent[] | undefined = ctx.sessions.get(sessionId)?.snapshotEvents()
+      if (events === undefined) {
+        const persistence = ctx.get('sessionPersistence')
+        if (persistence !== undefined) {
+          try {
+            events = (await persistence.inspect(sessionId)).events
+          } catch {
+            // Cold read unavailable (session never persisted): an empty
+            // window is the honest answer, not a wire error.
+          }
+        }
+      }
+      if (events === undefined) return { events: [], lastSeq: Math.max(afterSeq, 0) }
+      const CHANGES_EVENTS_CAP = 4000
+      const filtered = events.filter(
+        event => (event.type === 'tool/call' || event.type === 'tool/result') && event.seq > afterSeq,
+      )
+      const window = filtered.length > CHANGES_EVENTS_CAP ? filtered.slice(filtered.length - CHANGES_EVENTS_CAP) : filtered
+      return { events: window, lastSeq: window.at(-1)?.seq ?? afterSeq }
     },
     // Release a terminal immediately. The WebSocket close frame already does
     // this while the socket is open; this route covers the tab-close that
@@ -685,7 +754,10 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     }
   }
   ctx.inject(['settings'], (sctx) => {
-    const ns: SettingsNamespace = settingsNamespace(SIDEBAR_PREFS_NS)
+    // DSH 0.1.2-alpha.2 validates namespaces at compile time
+    // (SettingsNamespaceInput); the 'dsh-better-sidebar' literal passes, so the
+    // runtime helper this used to call (settingsNamespace) is gone upstream.
+    const ns = SIDEBAR_PREFS_NS
     // The structural settings mirror types `schema` as unknown, so the
     // generic is not inferred here; the real service resolves it from the
     // schemastery schema (PrefsSchema) — narrow the owner scope explicitly.
@@ -814,13 +886,14 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         if (sessionId === null || dir === null || relativePath === null || relativePath.trim() === '') {
           throw new SidebarError('bad-request', 'sessionId, dir, and relativePath are required')
         }
-        const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
+        const cwd = await sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
         const { path, size } = await writeWorkspaceUpload({
           cwd,
           dir,
           relativePath,
           chunks: req,
           limit: resolved.uploadLimit,
+          fence: fenceEnabledOf(() => settingsFace),
         })
         writeOk(res, { path, size })
       } catch (error) {
@@ -855,8 +928,8 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         const sessionId = url.searchParams.get('sessionId')
         const raw = url.searchParams.get('path')
         if (sessionId === null || raw === null) throw new SidebarError('bad-request', 'sessionId and path are required')
-        const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
-        const path = await ensureWorkspacePath(cwd, raw)
+        const cwd = await sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
+        const path = await ensureWorkspacePath(cwd, raw, fenceEnabledOf(() => settingsFace))
         const info = await stat(path)
         if (!info.isFile() || info.size > resolved.mediaLimit) {
           throw new SidebarError('fs-error', 'not a file or too large', 400)
@@ -914,8 +987,8 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         // back to the process cwd and is normally refused by the workspace
         // real-path guard, with the same semantics as the media route's
         // fallback.
-        const cwd = sessionCwdOf(ctx, sessionId)
-        const absolute = await ensureWorkspacePath(cwd, path)
+        const cwd = await sessionCwdOf(ctx, sessionId)
+        const absolute = await ensureWorkspacePath(cwd, path, fenceEnabledOf(() => settingsFace))
         const info = await stat(absolute)
         if (!info.isFile() || info.size > resolved.mediaLimit) {
           throw new SidebarError('fs-error', 'not a file or too large', 400)
@@ -1131,11 +1204,14 @@ async function attachTerminal(
       ws.close(1011, PTY_DEPS_MISSING)
       return
     }
-    const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
+    const cwd = await sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
     // Settings-page shell overrides win over the yaml/auto shell for
     // terminals opened from now on (existing pty handles keep their shell).
     const overrides = shellOverridesOf(getSettings)
     const handle = ptyManager.open(sessionId, tabId, cwd, 80, 24, overrides.shell, overrides.shellArgs)
+    // Windows pre-ready gate for the resize frames this socket may deliver
+    // (see armPtyResizeGate; inert on POSIX).
+    armPtyResizeGate(handle.pty)
     // Replay the transcript, then follow live output.
     if (handle.transcript !== '') ws.send(handle.transcript)
     const onData = (data: string): void => {
@@ -1182,8 +1258,7 @@ async function attachTerminal(
         && control.type === 'resize'
         && typeof control.cols === 'number' && typeof control.rows === 'number'
       ) {
-        const dims = clampDims(control.cols, control.rows)
-        handle.pty.resize(dims.cols, dims.rows)
+        tryResizePty(handle.pty, control.cols, control.rows)
       } else {
         handle.pty.write(text)
       }
@@ -1251,8 +1326,7 @@ function pumpAgentTerminal(
       && control.type === 'resize'
       && typeof control.cols === 'number' && typeof control.rows === 'number'
     ) {
-      const dims = clampDims(control.cols, control.rows)
-      handle.pty.resize(dims.cols, dims.rows)
+      tryResizePty(handle.pty, control.cols, control.rows)
     } else if (control === null) {
       // Raw text input (a JSON-looking string the pty would have received
       // verbatim is reachable in theory but is exotic for an agent terminal;
