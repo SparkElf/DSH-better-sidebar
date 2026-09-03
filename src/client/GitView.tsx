@@ -14,13 +14,14 @@ import {
   Button, IconBranchOutline16, IconCodeOutline16, IconCopyOutline16, IconRefreshOutline16,
   IconTrashOutline16, Input, Menu, Modal, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { GitLogEntry, GitStatusEntry, GitStatusResult, GitWorktree, SessionScope } from './api.ts'
-import { api } from './api.ts'
-import { isWithinWorkspace, relativeTo } from './paths.ts'
-import { resolveSidebarPath } from './produced-files.ts'
-import { relativeTime, t } from './locales.ts'
-import type { SidebarTab } from './state.ts'
-import css from './sidebar.module.css'
+import type { GitLogEntry, GitStatusEntry, GitStatusResult, GitWorktree, SessionScope } from '../api.ts'
+import { api } from '../api.ts'
+import { usePolling } from '../use-polling.ts'
+import { baseName, isWithinWorkspace, relativeTo } from '../paths.ts'
+import { resolveSidebarPath } from '../produced-files.ts'
+import { relativeTime, t } from '../locales.ts'
+import type { SidebarDiffRef, SidebarStore } from '../state.ts'
+import css from './changes.module.css'
 
 /** The XY status letters a row badge shows (X = index, Y = worktree). */
 function badgeOf(entry: GitStatusEntry): string {
@@ -69,6 +70,12 @@ function refNames(refs: string): string[] {
   )]
 }
 
+/** One thrown value as display text (every error banner/row here normalizes
+ *  through this so non-Error rejections never render as '[object Object]'). */
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason)
+}
+
 /** The pending destructive action (discard / revert / cherry-pick), gated by a confirm modal. */
 interface ConfirmState {
   title: string
@@ -81,7 +88,14 @@ interface ConfirmState {
  *  floods the panel at once (the end of the log is reached by paging). */
 const LOG_BATCH = 20
 
-export function GitView(props: {
+/** Every Nth silent poll re-lists worktrees (and re-runs auto-selection): the
+ *  2s tick only needs the selected checkout's STATUS, and re-listing spawned
+ *  a second git process per tick for a list that almost never changes — a
+ *  linked checkout the agent creates mid-session is picked up within ~30s
+ *  instead of 2s. */
+const WORKTREE_RECHECK_TICKS = 15
+
+export interface GitLensProps {
   scope: SessionScope
   onOpenFile: (path: string) => void
   /** Open a diff tab (the shell places it below the git pane on first use). */
@@ -120,8 +134,10 @@ export function GitView(props: {
    *  avoids a spurious full refresh on every auto-select (the very state
    *  change refresh writes back via setSelectedWorktree would recreate the
    *  callback and re-trigger the mount effect — an N→N+1 fetch loop). */
-  const selectedRef = useRef<string | undefined>(undefined)
-  useEffect(() => { selectedRef.current = selectedWorktree }, [selectedWorktree])
+  const chosenPathRef = useRef<string | undefined>(undefined)
+  useEffect(() => { chosenPathRef.current = selectedWorktree }, [selectedWorktree])
+  /** Silent polls since the last worktree re-list (see WORKTREE_RECHECK_TICKS). */
+  const silentTickCount = useRef(0)
 
   const gitScope: SessionScope = repoRoot === undefined ? scope : { ...scope, repoRoot }
 
@@ -147,11 +163,14 @@ export function GitView(props: {
       setLogEnded(logResult.length < LOG_BATCH)
     } catch (reason) {
       if (options.generation === refreshGeneration.current) {
-        setError(reason instanceof Error ? reason.message : String(reason))
+        setError(errorMessage(reason))
       }
     } finally {
       if (options.loading && options.generation === refreshGeneration.current) setLoading(false)
     }
+    // Granular scope fields: the scope object's identity churns, only its
+    // sessionId / cwd fields gate the git target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope.sessionId, scope.cwd, repoRoot])
 
   const refresh = useCallback(async (silent = false): Promise<void> => {
@@ -159,6 +178,15 @@ export function GitView(props: {
     refreshInFlight.current = true
     let generation = refreshGeneration.current
     try {
+      // Fast path for the ordinary silent tick: the selected checkout's
+      // STATUS is all that changes between worktree re-lists (see
+      // WORKTREE_RECHECK_TICKS) — one git process instead of two.
+      if (silent && chosenPathRef.current !== undefined && (silentTickCount.current += 1) % WORKTREE_RECHECK_TICKS !== 0) {
+        const statusResult = await api.gitStatus(gitScope, chosenPathRef.current)
+        if (generation === refreshGeneration.current) setStatus(statusResult)
+        return
+      }
+      silentTickCount.current = 0
       const listed = await api.gitWorktrees(scope)
       if (generation !== refreshGeneration.current) return
       setWorktrees(listed)
@@ -200,19 +228,23 @@ export function GitView(props: {
       await refreshTarget(target, { loading: !silent, generation })
     } catch (reason) {
       if (generation === refreshGeneration.current) {
-        setError(reason instanceof Error ? reason.message : String(reason))
+        setError(errorMessage(reason))
         if (!silent) setLoading(false)
       }
     } finally {
       refreshInFlight.current = false
     }
+    // Granular scope fields: the scope object's identity churns, only its
+    // sessionId / cwd fields gate the refresh target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope.sessionId, scope.cwd, refreshTarget])
 
   useEffect(() => {
     refreshGeneration.current += 1
     refreshInFlight.current = false
     worktreeChosenByUser.current = false
-    selectedRef.current = undefined
+    chosenPathRef.current = undefined
+    silentTickCount.current = 0
     setSelectedWorktree(undefined)
   }, [scope.sessionId, scope.cwd])
   useEffect(() => { void refresh() }, [refresh])
@@ -248,11 +280,11 @@ export function GitView(props: {
     const generation = refreshGeneration.current += 1
     void refreshTarget(selectedRef.current ?? '', { loading: true, generation })
   }
-  useEffect(() => {
-    if (!visible) return
-    const timer = window.setInterval(() => { void refresh(true) }, 2_000)
-    return () => { window.clearInterval(timer) }
-  }, [visible, refresh])
+  /** The silent poll tick (the status-only fast path between worktree
+   *  re-lists, see refresh) — fixed 2s cadence while visible, no initial
+   *  burst (mount and scope changes already refresh above). */
+  const pollTick = useCallback((): Promise<void> => refresh(true), [refresh])
+  usePolling(visible, pollTick, { intervalMs: 2_000 })
 
   /** Append the next history page (lazy: only when the user asks for more). */
   const loadMoreLog = async (): Promise<void> => {
@@ -268,8 +300,8 @@ export function GitView(props: {
       setLogEntries(entries => [...entries, ...next])
       if (next.length < LOG_BATCH) setLogEnded(true)
     } catch (reason) {
-      if (generation === refreshGeneration.current && target === selectedRef.current) {
-        setCommitError(`${t('historyLoadError')}: ${reason instanceof Error ? reason.message : String(reason)}`)
+      if (generation === refreshGeneration.current && target === chosenPathRef.current) {
+        setCommitError(`${t('historyLoadError')}: ${errorMessage(reason)}`)
       }
     } finally {
       if (generation === refreshGeneration.current && target === selectedRef.current) setLogLoadingMore(false)
@@ -328,7 +360,7 @@ export function GitView(props: {
       setCommitMsg('')
       await refresh()
     } catch (reason) {
-      setCommitError(reason instanceof Error ? reason.message : String(reason))
+      setCommitError(errorMessage(reason))
     } finally {
       setBusy(false)
     }
@@ -342,7 +374,7 @@ export function GitView(props: {
       await api.gitCheckout(gitScope, branch, selectedWorktree)
       await refresh()
     } catch (reason) {
-      setCommitError(`${t('checkoutError')}: ${reason instanceof Error ? reason.message : String(reason)}`)
+      setCommitError(`${t('checkoutError')}: ${errorMessage(reason)}`)
     } finally {
       setBusy(false)
     }
@@ -357,7 +389,7 @@ export function GitView(props: {
         await confirmState.onConfirm()
         await refresh()
       } catch (reason) {
-        setCommitError(reason instanceof Error ? reason.message : String(reason))
+        setCommitError(errorMessage(reason))
       } finally {
         setBusy(false)
       }

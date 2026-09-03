@@ -12,7 +12,8 @@ import { act } from 'react-dom/test-utils'
 import { GitView } from '../src/client/GitView.tsx'
 import { api, type GitLogEntry, type GitStatusResult, type GitWorktree } from '../src/client/api.ts'
 
-;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
+import { setupReactAct } from './test-utils.ts'
+setupReactAct()
 
 const MAIN = 'C:/repo/main'
 const AGENT = 'C:/repo/agent'

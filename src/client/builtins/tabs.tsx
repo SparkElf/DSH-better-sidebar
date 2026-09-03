@@ -138,8 +138,39 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       icon: (size: number) => <IconBranchOutline16 size={size} />,
       order: 20,
       single: true,
-      component: ({ ctx, store, scope, visible, onOpenDiff }) => (
-        <GitView
+      badge: (_ctx, scope) => {
+        const count = opCountOf(scope.sessionId)
+        return count === undefined || count === 0 ? null : count
+      },
+      // Declarative settings: the diff-open picker (free window vs docked
+      // pane) renders as an iconed select row under the changes card's gear
+      // in the Side card settings page.
+      settings: {
+        toggles: [{
+          key: 'changesDiffFloat',
+          type: 'select',
+          title: () => t('changesDiffOpenTitle'),
+          desc: () => t('changesDiffOpenDesc'),
+          options: [
+            {
+              value: true,
+              icon: (size: number) => <IconFloatWindowOutline16 size={size} />,
+              title: () => t('changesDiffOpenFloat'),
+              desc: () => t('changesDiffOpenFloatDesc'),
+            },
+            {
+              value: false,
+              icon: (size: number) => <IconPanelBottomOutline16 size={size} />,
+              title: () => t('changesDiffOpenPane'),
+              desc: () => t('changesDiffOpenPaneDesc'),
+            },
+          ],
+        }],
+      },
+      component: ({ ctx, store, scope, tab, visible, onOpenDiff }) => (
+        <ChangesTab
+          ctx={ctx}
+          store={store}
           scope={scope}
           visible={visible}
           onOpenFile={(path) => { openSidebarFile(ctx, store, scope.sessionId, path) }}
@@ -154,7 +185,7 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       order: 30,
       single: true,
       // Declarative settings: the auto-open switches render under this row in
-      // the Side card settings page (the Jobs page's own related settings).
+      // the Side card settings page (the Tasks page's related settings).
       settings: {
         toggles: [{
           key: 'autoOpenSubagent',

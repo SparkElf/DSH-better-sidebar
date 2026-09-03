@@ -42,13 +42,13 @@ better-sidebar 从 v0.4.0 起暴露 `ctx.betterSidebar` 服务（Cordis context 
 - **消费侧**：你的插件的 client half（`inject = ['betterSidebar', ...]`，然后 `ctx.betterSidebar.registerTab(...)`）
 - **类型合并**：`declare module '@deepseek-ai/cordis' { interface Context { betterSidebar: BetterSidebarService } }` 由 `dsh-better-sidebar` 包导出；消费插件 `import type {} from 'dsh-better-sidebar'` 即触发类型合并
 
-> ⚠️ **host 半不发布此服务**：`ctx.betterSidebar` 只在 client 侧存在。如果你的插件 host 半需要读 better-sidebar 状态，走 better-sidebar 自己的 HTTP/WS 路由（`/sidebar/api/*`），不走服务。
+本地：`pnpm build && pnpm pack && pnpm exec playwright install chromium && pnpm test:mount`。CI 钉 `@deepseek-ai/dsh@0.1.2-rc.1`（`next` dist-tag；peer 下限 `^0.1.2-rc.1`）。e2e spec 命名 `*.e2e.ts` + vitest `exclude` 双保险；**改 `exclude` 必须保留默认排除项**（exclude 整体替换默认值）。
 
 ---
 
-## 2. 消费插件的最小骨架
+## 3. DSH 0.1.2 适配要点（0.1.2-rc.1+ 基线）
 
-### 2.1 `package.json`
+**v0.18.0 起插件毕业正式版（npm `latest`），仅支持 DSH 0.1.2-rc.1+**（peer 下限 `^0.1.2-rc.1`，CI 钉 `@deepseek-ai/dsh@0.1.2-rc.1`，DSH rc.x 发在 `next` dist-tag）。v0.18.0-alpha.0 进入 alpha 通道时已删除对 0.1.0-rc.8 ~ 0.1.1-rc.2 的兼容层——双方言 RPC（点分回退）、MarkdownText 双形状 labels、`dsh-client-runtime` externals/inject 残留行；stable DSH 用户请固定装 v0.17.1（npm 上的旧 latest，0.1.2-alpha.x 宿主继续用 npm `alpha` 的 v0.18.0-alpha.0）。发版：release.yml 按版本号是否含 `-` 自动选 `alpha`/`latest` dist-tag。
 
 ```jsonc
 {
@@ -63,60 +63,16 @@ better-sidebar 从 v0.4.0 起暴露 `ctx.betterSidebar` 服务（Cordis context 
 }
 ```
 
-- `dsh-better-sidebar` 必须声明为 **peerDependency**（不是 dependency，避免重复实例化）
-- 标记 `optional: true` 让你的插件在 better-sidebar 未安装时也能加载（注册代码会因为 `ctx.betterSidebar` 为 undefined 而跳过）
-
-### 2.2 client half 入口
-
-```ts
-// my-plugin/src/client/index.ts
-import type {} from 'dsh-better-sidebar'  // 触发 ctx.betterSidebar 类型合并
-
-export const inject = ['betterSidebar', 'slots']  // 声明服务依赖
-
-export function apply(ctx: Context): void {
-  // 注册一个 sidebar tab
-  ctx.effect(() =>
-    ctx.betterSidebar.registerTab({
-      id: 'my-plugin:db',
-      title: () => 'Database',
-      icon: <DbIcon />,
-      order: 50,
-      component: ({ ctx, scope, tab }) => <DbView sessionId={scope.sessionId} />,
-    })
-  )
-
-  // 注册一个文件预览器
-  ctx.effect(() =>
-    ctx.betterSidebar.registerFileViewer({
-      id: 'my-plugin:csv',
-      exts: ['csv'],
-      fetchStrategy: 'custom',
-      load: async (path, scope) => parseCsv(await fetchCsvBytes(scope, path)),
-      component: ({ customData, path }) => <CsvGrid data={customData} path={path} />,
-    })
-  )
-}
-```
-
-> ⚠️ **构建期纯度门**：client bundle 禁止 value-import 别的插件代码（`tsdown.config.ts` 的纯度门会挡）。`import type {}` 会被擦除，**不触发门禁**——所以类型可以自由共享，运行时符号不行。所有运行时交互必须走 `ctx.betterSidebar` 的方法调用。
-
-### 2.3 类型导入
-
-```ts
-import type { TabDescriptor, FileViewerDescriptor, BetterSidebarService } from 'dsh-better-sidebar'
-```
-
-类型定义在 `lib/types/client/service.d.ts`，通过 `package.json` 的 `./client/service`（别名 `./client/api`）exports 子路径暴露。v0.12.0 起服务模块还 re-export 了完整的状态词汇表，消费者可以直接命名（不再只能靠推断）：
-
-```ts
-import type {
-  SidebarTab, SidebarState, SidebarStore, SidebarSnapshot, SidebarDiffRef, TabType,
-  SessionScope, SidebarPrefs, OpenTabSeed, SidebarSettingsRenderProps,
-} from 'dsh-better-sidebar/client/service'
-```
-
-> 💡 **类型合并触发路径**：`import type {} from 'dsh-better-sidebar/client/service'` 同样会加载 `Context` 的 augmentation（`declare module '@deepseek-ai/cordis'` 在 context-types.d.ts 中，service 声明会拉入它）——纯浏览器侧插件建议走 `client/service` 路径，避免拉进宿主半的 Node 类型图（主入口 `dsh-better-sidebar` 的声明面含宿主代码，宿主消费者本就处于 Node 环境）。client 可达声明图（`client/*` + context-types + html-route + prefs-shared）自 v0.12.0 起**零 Node 依赖**（`scripts/check-consumer-types.sh` 守护），无 `@types/node`、`skipLibCheck: false` 也能编译。
+1. **一次性 token 鉴权**：就绪行 `dsh web: http://127.0.0.1:<port>/?token=<43字符>`（导航换签名 cookie，干净 URL 401）。`e2e-mount.sh` 的 URL grep 必须延伸到空白（`[^ ]*`，在 `/` 截断丢 token）；e2e 统一走 `tests/e2e/host.ts`（token 必选：`parseLaunchUrl` 对裸 origin 直接抛错），带 stamps 导航走 `gotoPage()`（先 addCookies 再直达——token 换 cookie 的 303 会丢弃同 URL 其它 query 参数）。插件 `/sidebar/*` 路由不受影响，同源 fetch 照旧。
+2. **Remote gateway 斜杠 RPC（唯一方言）**：`POST /api/workspace/create`，payload 恰为 `{args: {...}}`，**args 按控制器 TS 参数名包装**（`workspace/create`、`session/create` → `{args:{request:{...}}}`；`session/list` 参数名 `_request` **不可省略**——`{}` 也被拒 `args fields do not match the descriptor`）；envelope `method` 与路径一致，点分路径 404。请求由 `tests/e2e/host-protocol.ts` 的 `rpcAttempt` 构造、`tests/e2e-host-protocol.spec.ts` 锁定；要调新方法先在真机验参数名再进 `RPC_ARGS_KEY`。
+3. **`MarkdownText` labels 嵌套契约**：必填 `labels: { code: { copyLabel, copiedLabel }, footnotes }`（漏传回退硬编码中文）。四个渲染点（mermaid.tsx / MarkdownHtml.tsx / TextEditor.tsx / SideChatView.tsx）统一走 `src/client/markdown-labels.tsx` 的 `markdownTextProps()`。
+4. **侧边对话转录走自有路由，不碰客户端宿主 RPC**：`ctx.connection.api`（含 `sessions.history`）在 alpha.1 整体移除，继任 `session/follow|page` 又对 `origin:'subagent'` 会话强制 subagent 地址（普通 `{kind:'session'}` 被 `agent-busy` 拒）且分页 `throughSeq` 不得超当前游标。转录因此由 **`sidechat.events`** 插件路由供给（`src/sidechat-routes.ts`：live 读 `agent.session.snapshotEvents()`（0.1.2-alpha.4 起的按需读 API，前身 `Session.events` 属性已删）、冷读 `sessionPersistence.inspect`，服务端 `session/end-seed` 切割 + `afterSeq` 增量）；`ctx.connection` 镜像与 inject 已删。设计见 [docs/plans/2026-08-20-sidechat-tab-design.md](docs/plans/2026-08-20-sidechat-tab-design.md) §10。
+5. **`dsh-settings` 无运行时 `settingsNamespace`**：命名空间合法性校验转为编译期模板字面量 `SettingsNamespaceInput`（小写字母开头 + `[a-z0-9-]` 尾部），`'dsh-better-sidebar'` 字面量直接过——宿主侧直接传常量（`src/index.ts` 的 settings inject）。
+6. **`dsh-subagent` 的 `SUBAGENT_DESCRIPTOR_VERSION` 2 → 3**：sidechat 种子的 `subagent/descriptor` 版本由宿主包盖章，插件不硬编码；测试断言跟随常量（`tests/sidechat-routes.spec.ts`），勿钉字面量。
+7. **`@deepseek-ai/dsh-client-runtime` 包已消亡**（继任 seed 是裸名 `dsh-client-store`，无 `/client` 子路径）：peerDependencies、devDependencies、`dsh.client.inject`、chunk externals 白名单（`src/client/chunk-loader.ts` / `tsdown.config.ts` / `tests/chunk-loader.spec.ts` / `tests/manifest-consistency.spec.ts` 四处同步）均已无该条目。
+8. **e2e scratch profile 的 `minimumReleaseAgeExclude` 含 `'@deepseek-ai/*'`**（`scripts/e2e-mount.sh` / `e2e-aggregate-mount.sh`，与仓库根 `pnpm-workspace.yaml` 同策）：alpha 版本常在发布后 24h 内跑 lane，pnpm 11 的 `minimumReleaseAge` 默认会拒装新鲜包。
+9. **插件开发树的 dsh-* 传递 peer 需提升为 devDependencies**（alpha.3 首见）：`dsh-subagent` 等 npm 包把 `dsh-attachment` 等 dsh-* 姊妹包全部声明为 peerDependencies（由宿主 bundle 树统一提供，宿主侧无此问题），插件仓库若只直接依赖其中一部分，其余 peer 在 pnpm 下会解析到树上残留的旧版——如 `dsh-attachment@0.1.1-rc.1` 缺 `admitPromptContent` 导出、`dsh-subagent` 产物 import 它时测试加载即崩。因此 devDependencies 需涵盖 dev 树实际触达的全部 peer（attachment / code-runtime / scope / session-projection / system-prompt / user-approval / util-time 七个即为此提升，与直接依赖同款精确钉版）；`@deepseek-ai/cordis` peer 自 alpha.3 起要求 `^4.0.2`（上游全线 peer 已升）。适配新 alpha 版本时先跑 `pnpm peers check`，把新失配的传递 peer 一并提升进 devDependencies。例外：**`dsh-client-locale` 的 peer/devDep 允许落后于基线**（alpha.5 时上游停在 0.1.2-alpha.3 未发新版）——peer 下限 `^0.1.2-alpha.3` 天然容纳同 tuple 的 alpha.5 运行时，此时保持旧钉版并在 `pnpm-workspace.yaml` 注明，待上游发版再追平；rc.1 起上游恢复发版，peer/devDep 已与基线一并钉 `0.1.2-rc.1`，该例外消除。
+10. **聊天文件打开漏斗是 `remote.session.openWorkspacePath`**（`ctx.workspaces.openPath` 已随 alpha 删除，`IWorkspaces` 无此方法）：「聊天区文件在侧边栏打开」拦截在 `ctx.inject(['remote.session'], …)` 内以 **defineProperty 数据属性遮蔽**该命名空间方法（gateway client 的方法是 accessor 属性、异步挂载、contribution 重挂载时服务重建——inject 回调重跑即自愈）；实现见 `src/client/openpath-intercept.ts`，设计见 [docs/plans/2026-08-31-openpath-intercept-alpha-design.md](docs/plans/2026-08-31-openpath-intercept-alpha-design.md)。
 
 ---
 

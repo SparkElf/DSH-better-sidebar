@@ -3,11 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-
-const BASE_URL = process.env.DSH_E2E_URL
-if (!BASE_URL) {
-  throw new Error('DSH_E2E_URL is not set — boot a DSH web instance with the plugin mounted and point this lane at it (see scripts/e2e-mount.sh)')
-}
+import { PAGE_URL } from './host'
 
 const WORKSPACE_PATH = process.env.DSH_E2E_DESKTOP_WORKSPACE
   ?? (process.env.DSH_E2E_WORKSPACE === undefined
@@ -46,7 +42,7 @@ test('right panel keeps desktop session actions in their header positions', asyn
   page.on('requestfailed', request => requestFailures.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? 'unknown'}`))
   page.on('response', response => { if (response.status() >= 400) badResponses.push(`${response.status()} ${response.url()}`) })
 
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' })
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await dismissOnboarding(page)
 
   await page.getByRole('button', { name: /^(Choose workspace|选择工作区)$/ }).click()
@@ -59,7 +55,12 @@ test('right panel keeps desktop session actions in their header positions', asyn
   await expect(pathInput).toBeHidden()
   await picker.getByRole('button', { name: /^(Open|打开)$/ }).click()
 
-  const composer = page.getByRole('textbox').last()
+  // Target the ACTIVE composer by its accessible name. DSH 0.1.2-alpha hosts
+  // keep an INERT `data-composer-input` "Choose workspace" textbox (with
+  // contenteditable="false") later in DOM order than the real composer — a
+  // bare `getByRole('textbox').last()` resolved to that one and fill() threw
+  // ("not an <input>, <textarea> or [contenteditable] element").
+  const composer = page.getByRole('textbox', { name: /^(Describe what you want to build|描述你想要构建)/ })
   await expect(composer).toBeVisible()
   await composer.fill('Create a desktop side-card layout test session.')
   await page.getByRole('button', { name: /^(Send message|发送消息)$/ }).click()

@@ -46,6 +46,7 @@ import {
 } from '../sidechat-core.ts'
 import { collectOwnEvents, toolArgsSummary, transcriptRows, type SidechatTranscriptRow } from './sidechat-transcript.ts'
 import { api } from './api.ts'
+import { usePolling } from './use-polling.ts'
 import { t } from './locales.ts'
 import type { SessionScope } from './api.ts'
 import type { SidebarTab } from './state.ts'
@@ -273,7 +274,9 @@ export function SideChatView(props: {
   const [info, setInfo] = useState<SidechatThreadInfo | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
 
-  const cacheRef = useRef<ThreadCache>({ seedBoundary: null, entries: [] })
+  const cacheRef = useRef<ThreadCache>({ entries: [] })
+  // The previous poll's rows (see the mapping's reuse pass below).
+  const prevRowsRef = useRef<SidechatTranscriptRow[]>([])
   const controllerRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -376,7 +379,8 @@ export function SideChatView(props: {
   // Reset the transcript cache whenever the binding changes, then focus
   // the composer — it owns the first message of a fresh thread.
   useEffect(() => {
-    cacheRef.current = { seedBoundary: null, entries: [] }
+    cacheRef.current = { entries: [] }
+    prevRowsRef.current = []
     controllerRef.current?.abort()
     setError(null)
     setSaved(false)
@@ -387,22 +391,49 @@ export function SideChatView(props: {
     }
   }, [threadId, fetchInfo])
 
-  // Poll while the tab is visible and the thread runs.
+  // One transcript pull on every input change (attach, visibility flip,
+  // run-state flip — the last one catches a thread's terminal state once it
+  // stops running).
   useEffect(() => {
     if (!visible || threadId === undefined) return
     void fetchThread(threadId)
-    if (!running) return
-    const timer = window.setInterval(() => {
-      void fetchThread(threadId)
-      void fetchInfo(threadId)
-    }, POLL_MS)
-    return () => { window.clearInterval(timer) }
-  }, [visible, threadId, running, fetchThread, fetchInfo])
+    // `running` is not read here, but re-triggering this pull on run-state
+    // flips is load-bearing (see above); the badge fetch rides the ticks.
+  }, [visible, threadId, running, fetchThread])
+
+  // Poll while the tab is visible and the thread runs: transcript deltas +
+  // badge refresh on a fixed cadence. Each pull self-guards (fetchThread
+  // aborts its predecessor; a late settle keeps the last rows).
+  const pollTick = useCallback(async (): Promise<void> => {
+    if (threadId === undefined) return
+    void fetchThread(threadId)
+    void fetchInfo(threadId)
+  }, [threadId, fetchThread, fetchInfo])
+  usePolling(visible && running && threadId !== undefined, pollTick, { intervalMs: POLL_MS })
 
   useEffect(() => () => { controllerRef.current?.abort() }, [])
 
-  const rows = useMemo(
-    () => (threadId === undefined ? [] : transcriptRows(cacheRef.current.entries)),
+  // When the wire recovers (disconnected → connected), pull immediately
+  // instead of waiting for the next poll tick — or, on an idle thread that
+  // stopped polling, forever.
+  const prevConnectionRef = useRef(connectionState)
+  useEffect(() => {
+    const previous = prevConnectionRef.current
+    prevConnectionRef.current = connectionState
+    if (previous === 'disconnected' && connectionState === 'connected' && threadId !== undefined) {
+      void fetchThread(threadId)
+      void fetchInfo(threadId)
+    }
+  }, [connectionState, threadId, fetchThread, fetchInfo])
+
+  // The previous poll's rows ride into the mapping so unchanged rows keep
+  // their object identity (see reuseRows): the 2s poll re-renders only the
+  // changed tail instead of re-parsing markdown for the whole transcript.
+  const rows = useMemo(() => {
+    const next = threadId === undefined ? [] : transcriptRows(cacheRef.current.entries, prevRowsRef.current)
+    prevRowsRef.current = next
+    return next
+  },
     // The cache is a ref; revision bumps on every successful pull.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [threadId, revision],
@@ -449,7 +480,6 @@ export function SideChatView(props: {
       }
     }
     return items
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threads])
 
   const growComposer = (): void => {
@@ -563,7 +593,7 @@ export function SideChatView(props: {
           )}
           items={menuItems}
           selectedId={threadId}
-          onSelect={(id) => { id === '$new' ? openNewThread() : openExistingThread(id) }}
+          onSelect={(id) => { if (id === '$new') openNewThread(); else openExistingThread(id) }}
           onClose={() => { setMenuOpen(false) }}
           align="end"
           portal

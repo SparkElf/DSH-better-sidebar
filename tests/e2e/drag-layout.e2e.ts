@@ -628,33 +628,163 @@ test('bottom panel never flashes full-width after a width drag release (issue #2
   }
 })
 
-test('the bottom-push anchor resolves through the composite selectors (at least one; same element when both)', async ({ page }) => {
-  // layout.css pushes the bottom panel via the center column. The selector
-  // is COMPOSITE on purpose: `[data-pane="conversation"]` (0.1.x naming)
-  // and `:has(> [data-slot="conversation"])` (rc.8-era naming) — HOST
-  // VERSIONS MAY RENAME THE ATTRIBUTE (issue #208 comment / PR #226), so
-  // the contract is "at least one resolves", and when both resolve they
-  // must hit the SAME element (otherwise the push would land twice).
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' })
+test('the bottom-push anchor resolves through the shell-written center-column tag', async ({ page }) => {
+  // layout.css pushes the bottom panel via the center column, anchored on
+  // the [data-dsh-center-col] tag the Sidebar shell's locator writes onto
+  // the measured column node (Sidebar.tsx locate — the slot wrapper
+  // [data-slot="conversation"]'s parent). The tag must sit on exactly ONE
+  // node: a stale tag on a swapped-out node (boot swap / HMR) would leave
+  // the push rule anchorless or doubled.
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await expect(page.locator('[data-dsh-better-sidebar]')).toBeAttached({ timeout: 90_000 })
+  await expect
+    .poll(async () => page.evaluate(() => document.querySelectorAll('#root [data-dsh-center-col]').length), { timeout: 90_000 })
+    .toBe(1)
   const anchors = await page.evaluate(() => {
-    const a = document.querySelector('#root [data-dsh-frame] > [data-pane="conversation"]')
-    const b = document.querySelector('#root :has(> [data-slot="conversation"])')
-    const frame = document.querySelector('#root [data-dsh-frame]')
+    const tagged = document.querySelector('#root [data-dsh-center-col]')
+    const slotParent = document.querySelector('#root [data-slot="conversation"]')?.parentElement ?? null
     return {
-      a: a !== null,
-      b: b !== null,
-      same: a !== null && b !== null && a === b,
-      frameChildren: frame !== null
-        ? [...frame.children].map(el => `${el.tagName}[${[...el.attributes].map(attr => attr.name).filter(name => name.startsWith('data-')).join(',')}]`)
-        : [],
+      tagged: tagged !== null,
+      same: tagged !== null && slotParent !== null && tagged === slotParent,
     }
   })
-  expect(
-    anchors.a || anchors.b,
-    `at least one bottom-push anchor must resolve on this host (frame children: ${anchors.frameChildren.join(' / ') || 'no [data-dsh-frame]'})`,
-  ).toBe(true)
-  if (anchors.a && anchors.b) {
-    expect(anchors.same, 'both selectors must hit the SAME center-column element').toBe(true)
+  expect(anchors.tagged, 'the tagged center column must resolve').toBe(true)
+  expect(anchors.same, 'the tag must sit on the conversation slot wrapper\'s parent (the measured column)').toBe(true)
+})
+
+/* ── bottom-strip drag with the right panel CLOSED must not touch the host
+      layout — the regression test for the width-gate fix ───────────────── */
+
+test('dragging the bottom strip while the right panel is closed keeps the host layout still', async ({ page }) => {
+  // The bottom drag used to write the panel's persisted width preference into
+  // `--dsh-sidebar-width` regardless of `panelOpen` (only the idle push
+  // effect gated it): with the panel closed the variable jumped 0 → ~400px on the
+  // first drag frame, #root lost 400px instantly, the host frame's viewport
+  // dropped across its 1024px auto-collapse breakpoint, and the NATIVE left
+  // sidebar snapped to its 56px rail — then snapped back on release. The
+  // panel-side DOM writes keep the raw width (the bottom panel's `right`
+  // derives from it); only the PUSHED width must ride the panelOpen gate.
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
+  await expect(page.locator('#root > *')).not.toHaveCount(0, { timeout: 90_000 })
+  const sidebar = page.locator('[data-dsh-better-sidebar]')
+  await expect(sidebar).toBeAttached({ timeout: 90_000 })
+  await dismissOnboarding(page)
+
+  // The right panel stays CLOSED (openByDefault off): the width variable
+  // must read as the collapsed push before anything happens.
+  const readPushWidth = (): Promise<number> => page.evaluate(() => {
+    const value = parseFloat(document.documentElement.style.getPropertyValue('--dsh-sidebar-width'))
+    return Number.isNaN(value) ? 0 : value
+  })
+  await expect
+    .poll(async () => {
+      const height = await page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--dsh-sidebar-height')) || 0)
+      return height
+    }, { timeout: 90_000 })
+    .toBe(0)
+
+  const bottomExpand = sidebar.getByRole('button', { name: 'Expand bottom panel' })
+  await expect(bottomExpand, 'the toggle cluster must offer the bottom-panel expand button').toHaveCount(1)
+  await bottomExpand.click()
+  await expect
+    .poll(async () => {
+      const value = await page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--dsh-sidebar-height')) || 0)
+      return value
+    }, { timeout: 90_000 })
+    .toBeGreaterThan(0)
+  expect(await readPushWidth(), 'the closed right panel must push 0 width').toBe(0)
+
+  // Per-frame sampler on the HOST side: the pushed width variable, the host
+  // frame's inline grid template (its first track is the native left
+  // sidebar's width), the rendered left-column width (the grid transition
+  // animates mid-states, so this catches even a transient snap), and #root's
+  // right edge (where the width push lands).
+  await page.evaluate(() => {
+    const samples: Array<{ t: number; varW: number; gridCols: string; leftColW: number; rootRight: number; dragging: boolean }> = []
+    const center = document.querySelector('#root [data-slot="conversation"]')?.parentElement ?? null
+    const frame = center?.parentElement ?? null
+    const leftCol = frame?.firstElementChild ?? null
+    const root = document.querySelector('#root') as HTMLElement
+    const loop = (): void => {
+      const varW = parseFloat(document.documentElement.style.getPropertyValue('--dsh-sidebar-width'))
+      samples.push({
+        t: performance.now(),
+        varW: Number.isNaN(varW) ? 0 : varW,
+        gridCols: frame instanceof HTMLElement ? frame.style.gridTemplateColumns : '',
+        leftColW: leftCol?.getBoundingClientRect().width ?? -1,
+        rootRight: root.getBoundingClientRect().right,
+        dragging: document.body.hasAttribute('data-dsh-sidebar-dragging'),
+      })
+      requestAnimationFrame(loop)
+    }
+    requestAnimationFrame(loop)
+    ;(window as unknown as { __bottomDragSamples: typeof samples }).__bottomDragSamples = samples
+  })
+
+  // The bottom strip is the panel's top-edge row-resize hit strip. The panel
+  // SLIDES DOWN into place on expand: a box read mid-animation sits above the
+  // settled geometry and the pointerdown lands off-strip (the drag never
+  // starts). Wait until the strip's center sits at innerHeight - the pushed
+  // height (the panel's final top edge).
+  await expect
+    .poll(async () => {
+      const probe = await page.evaluate(() => {
+        const bottom = document.querySelector('[data-dsh-better-sidebar] [data-dsh-bottom-panel]')
+        if (bottom === null) return null
+        const strip = [...bottom.querySelectorAll<HTMLElement>('*')].find(el => getComputedStyle(el).cursor === 'row-resize')
+        if (strip === undefined) return null
+        const r = strip.getBoundingClientRect()
+        const heightVar = parseFloat(document.documentElement.style.getPropertyValue('--dsh-sidebar-height')) || 0
+        return Math.abs((r.y + r.height / 2) - (window.innerHeight - heightVar))
+      })
+      return probe === null ? Number.NaN : probe
+    }, { timeout: 30_000 })
+    .toBeLessThanOrEqual(8)
+  const stripBox = await page.evaluate(() => {
+    const bottom = document.querySelector('[data-dsh-better-sidebar] [data-dsh-bottom-panel]')
+    if (bottom === null) return null
+    const strip = [...bottom.querySelectorAll<HTMLElement>('*')].find(el => getComputedStyle(el).cursor === 'row-resize')
+    if (strip === undefined) return null
+    const r = strip.getBoundingClientRect()
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+  })
+  expect(stripBox, 'the bottom drag strip must be present (cursor: row-resize)').not.toBeNull()
+
+  // Drag the strip UP (grow the bottom panel) in steps, like a real resize.
+  await page.mouse.move(stripBox!.x, stripBox!.y)
+  await page.mouse.down()
+  for (let i = 1; i <= 12; i++) {
+    await page.mouse.move(stripBox!.x, stripBox!.y - i * 8, { steps: 2 })
+    await page.waitForTimeout(40)
+  }
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+
+  const samples = await page.evaluate(
+    () => (window as unknown as { __bottomDragSamples: Array<{ t: number; varW: number; gridCols: string; leftColW: number; rootRight: number; dragging: boolean }> }).__bottomDragSamples,
+  )
+  expect(samples.length, 'the frame sampler must have collected frames').toBeGreaterThan(20)
+  const dragging = samples.filter(s => s.dragging)
+  expect(dragging.length, 'the dragging attribute must appear during the drag').toBeGreaterThan(5)
+
+  // The drag must actually have resized the bottom panel (sanity: the height
+  // push committed to a bigger value than where it started).
+  const heightAfter = await page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--dsh-sidebar-height')) || 0)
+  expect(heightAfter).toBeGreaterThan(0)
+
+  // Contract: the pushed width stays 0 for EVERY frame — mid-drag AND after
+  // release. The old code let the panel's persisted preference (~400px)
+  // through on the first drag frame and the release commit.
+  for (const s of samples) {
+    expect(s.varW, `pushed width leaked during the bottom drag at t=${Math.round(s.t)} (got ${s.varW}px)`).toBe(0)
+  }
+  // Contract: the host layout never moves — same inline grid template, same
+  // rendered left-column width (the native sidebar would snap to its 56px
+  // rail when #root loses 400px on a 1280px viewport), same #root right edge.
+  const first = samples[0]!
+  for (const s of samples) {
+    expect(s.gridCols, `host grid template changed at t=${Math.round(s.t)}: ${first.gridCols} -> ${s.gridCols}`).toBe(first.gridCols)
+    expect(Math.abs(s.leftColW - first.leftColW), `native left column width changed at t=${Math.round(s.t)}: ${first.leftColW} -> ${s.leftColW}`).toBeLessThanOrEqual(1)
+    expect(Math.abs(s.rootRight - first.rootRight), `#root right edge changed at t=${Math.round(s.t)}: ${first.rootRight} -> ${s.rootRight}`).toBeLessThanOrEqual(1)
   }
 })

@@ -2,8 +2,9 @@
 
 > 面向 **消费插件开发者**：如何让你的插件向 better-sidebar 注册新的侧边栏页面（tab）和文件类型预览器。
 >
-> 适用版本：**v0.4.0+**（`ctx.betterSidebar` 服务）；声明式设置 **v0.4.1+**；text/number 设置行 **v0.11.0+**；本文档其余新 API（badge/生命周期/定向打开/插件设置/版本探测等）**v0.12.0+**。当前版本 v0.12.0。
-> 权威代码：`src/client/service.ts`（服务实现）、`src/client/builtins/`（内置 7 tab + 9 viewer 参考实现）、`lib/types/client/service.d.ts`（类型声明）。
+> 适用版本：**v0.4.0+**（`ctx.betterSidebar` 服务）；声明式设置 **v0.4.1+**；text/number 设置行 **v0.11.0+**；badge/生命周期/定向打开/插件设置/版本探测 **v0.12.0+**；select 设置行（`settingSelect`）与外链认领（`urlTarget`）**v0.13.0+**；统一 `@deepseek-ai/cordis` 类型基底 **v0.15.2+**；自由窗口（`floatWindows`）**v0.16.0+**；终端固定（pin）**v0.17.0+**。当前版本 **v0.18.0**（正式版，仅支持 DSH 0.1.2-rc.1+；旧宿主 stable 线为 v0.17.1）。
+> 权威代码：`src/client/service.ts`（服务实现）、`src/client/builtins/`（内置 8 tab + 6 viewer 参考实现）、`lib/types/client/service.d.ts`（类型声明）。
+> 仓库开发规则（硬约束 / CI / 发版）见 [AGENTS.md](../AGENTS.md)。
 
 ---
 
@@ -241,7 +242,10 @@ interface TabComponentProps {
   // 以下由内置 tab 使用，外部 tab 可忽略：
   expanded?: string[]          // explorer 的展开目录集
   onToggleDir?: (path: string) => void
-  onReferenceFile?: (path: string) => void
+  // 在会话 composer 插入一条 @ 引用。isDir=true 为目录：纯文本 `@dir/`，
+  // 保留宿主文件夹装饰与补全；false 为文件：走宿主结构化引用 chip
+  // （显示 @basename、序列化为完整 @path），宿主拒绝时回退纯文本。
+  onReferenceFile?: (path: string, isDir: boolean) => void
   onOpenFile?: (path: string) => void
   onOpenDiff?: (tab: SidebarTab) => void
   onSubagentJump?: (childSessionId: string) => void
@@ -680,11 +684,49 @@ ctx.effect(() =>
 | **第三语言覆盖（ja 等）** | 可选 peer `@huanlin/dsh-plugin-better-locale`（optional）提供 ja/ko 覆盖，**借用 DSH 英文槽位**（仅 DSH=en 时生效，zh 下惰性）。经 `ctx.get('betterLocale')` 注入 `t()`；未安装整段 no-op |
 | **懒加载 chunk** | 重依赖（xterm/CodeMirror）在独立 bundle（`lib/client-<name>.js`），经 `/sidebar/bundle` 按需下发；factory 赋到 `globalThis.__dshChunks__[<name>]`，由 `src/client/chunk-loader.ts` 物化，**不经** `__ModuleLoader__`。对消费插件透明 |
 | **聊天文件打开漏斗（alpha 宿主）** | 聊天里一切文件打开（工具行 / 产物行 / 正文提及 / 行内代码路径）汇入 `ctx.remote.session.openWorkspacePath`（Typert remote 命名空间，cordis 服务 key `remote.session`，方法为 **accessor 属性**、异步挂载）。better-sidebar 的「聊天区文件在侧边栏打开」即在 `ctx.inject(['remote.session'], …)` 内以 defineProperty 遮蔽该方法（`src/client/openpath-intercept.ts`）。你的插件若要观测/旁路聊天文件打开，走同一服务；不要假设 pre-alpha 的 `ctx.workspaces.openPath` 存在（alpha 的 `IWorkspaces` 已无此方法） |
->>>>>>> 3b3451a (fix(client): intercept the alpha chat file-open funnel (remote.session.openWorkspacePath))
 
 ---
 
-## 11. 完整最小示例
+## 11. 自由窗口（v0.16.0，`features` 含 `'floatWindows'`）
+
+任意 tab（含你注册的）可拖出侧边栏成为悬浮**自由窗口**——对你的组件基本透明，只需知道以下语义：
+
+- **拖出**：tab 拖到主会话区域（conversation 列）松开即浮动（`floatTab`：移入 `SidebarState.floats`，默认 390×780 按视口钳制居中，清空 pane 折叠）。检测在 `Sidebar.tsx`（`body[data-dsh-tab-dragging]` 门控）；窄视口禁用。右键「移动到自由窗口」始终可用。
+- **窗口操作**（`src/client/FreeWindow.tsx`，`[data-dsh-panel-host]` 内、z-42）：头部拖动移动；拖到 pane（`[data-dsh-pane]`）松开**停靠**（`dockFloat`）；右下角缩放（最小 320×200）；点击置顶（层叠 = `floats` 数组序）；X = `closeTab`（触发 `onClose`、释放终端）。
+- **持久化**：`floats` 随会话进 localStorage（`dsh-sidebar:v1:<sessionId>`）；`sanitizeState` 宽容校验（非法条目单独丢弃、几何钳入视口、diff/ephemeral 不持久化）。
+- **服务语义**：`openTab` 聚焦命中浮动 tab = 置顶窗口（不重复开）；`closeTab`/`activateTab` 关窗/置顶并触发回调；agent 终端 reconcile 移除已消失的浮动窗口。**浮窗内你的组件 `visible` 恒 true**。
+- **稳定寻址面**：`[data-dsh-float-window]` / `[data-dsh-float-id]` / `[data-dsh-pane]` / `[data-dsh-float-dock-over]` / `[class*='floatDropHint']`；全令牌驱动，头部 `-webkit-app-region: no-drag`。
+- **⚠️ portal 事件劫持陷阱**：拖拽表面子树含 portal 覆盖层时（如你的组件在 tab 头部区域渲染弹层），portal 后代合成事件**沿 React 树冒泡**回 `onPointerDown`，会被误判为拖拽开始（吞点击 + 抢 pointer，菜单/X 失灵；jsdom 不走此路径，只有 e2e 能抓）。拖拽起点必须带**同源守卫**：`event.currentTarget.contains(event.target)` 为假或目标在 `button` 内时直接返回（回归：`tests/free-window.spec.tsx` portaled-menu 用例）。
+
+---
+
+## 12. 皮肤兼容（令牌驱动）
+
+> better-sidebar 所有视觉值消费 DSH 的 `--dsw-alias-*` / `--dsw-font-*` / `--ds-*` 令牌（无硬编码颜色），**不做每皮肤适配**。已与 dsh-web-ui 皮肤中心兼容（10 款皮肤全覆盖 `--dsw-alias-*` 层；`tests/theme.spec.ts` 守护）。你的 tab/viewer 组件遵循同样的令牌规则即可自动兼容全部皮肤。
+
+### 12.1 规则
+
+- **面板表面**：右/底面板背景 = `var(--dsw-alias-bg-layer-1)`。**绝不消费 `--dsw-specific-sidebar-fill`**（宿主左导航专属，皮肤按左导航语义覆盖它，面板消费会失去填充）。换面板表面 = 覆写 `--dsw-alias-bg-layer-1`。
+- **终端/编辑器表面**：`effectiveTokenValue` 读 `--dsw-alias-bg-base`——`transparent` 与 alpha < 0.9 的半透明值回退不透明底色（文字不叠背景画，issue #90）；≥ 0.9 放行。
+- **根锚点**：宿主 div 带 `data-dsh-better-sidebar`（append 到 body）；其内**面板宿主层** `[data-dsh-panel-host]`（`fixed; inset:0; z-25; pointer-events:none; overflow:hidden+clip`，v0.13.1+），面板/开关簇 absolute 定位，免疫中间层 transform 劫持；页面级 transform 触发 `data-dsh-panel-host-degraded` 降级。`overflow` 级联是**契约**（`hidden` 兜底 + `clip` 收尾，`tests/panel-host-css.spec.ts` 守护）：`hidden` 盒子仍是滚动容器，脚本滚动或浏览器 scroll-into-view 修正（焦点移入视口外区域、嵌套 iframe/工作台加载时抢焦点、面板滑出动画中 focus() 落点）会沿最近可滚祖先滚走整层——面板与开关簇集体偏离视口角（computed left/right 仍"正确"，偏移藏在盒子自身 scroll offset 里）；`clip` 裁剪语义相同但不产生滚动盒，任何路径都滚不动这层。皮肤作用域覆盖限定在 `[data-dsh-better-sidebar]` 内。
+- **布局变量**（`<html>` 上，面板打开时有效）：`--dsh-sidebar-width` / `--dsh-sidebar-height`。右面板宽度 = AppFrame 的 `padding-right` 预留（新版 `#root [data-dsh-frame]` / rc.8 `#root > [data-slot="root"] > div` 双锚点），AppFrame border box 保持完整桌面视口宽度（Harness 以此判定桌面/窄屏布局，避免插件面板展开误入窄屏）；AppFrame 的 details 拖拽手柄按同一变量向左平移贴合列边缘。底部面板仍走 centerCol `margin-bottom`；centerCol 锚点 = **JS 标注**（禁止 `nth-child`）：侧栏 shell 的定位器给测得的 centerCol 节点打 `[data-dsh-center-col]` 标签（`Sidebar.tsx` locate，节点更换/HMR 时随 ref 迁移），`layout.css` 用 `#root [data-dsh-center-col]` 选中（`drag-layout.e2e.ts` 断言恰一节点且为 `[data-slot="conversation"]` 的父级；frame 宽度与桌面 Session Log 由 `desktop-layout.e2e.ts` 断言）。
+- **桌面信号与标题栏**（v0.14.1+ 四方案模型 `SidebarPrefs.titleBarScheme`，唯一决策点 `src/client/titlebar-strip.ts` 纯函数）：
+  - 壳信号（只读，不自动触发修改）：URL `dsh-desktop-mode` / `dsh-desktop-platform` / 可选 `dsh-desktop-titlebar-inset`（0–120 clamp）。
+  - **strip 取值链**：⓪ `web` 方案强制 0；① `navigator.windowControlsOverlay` 真实几何（`wco.ts` 订阅 `geometrychange`，**为 0 也权威**，`visible=false` 幽灵 API 视为缺失）；② URL inset；③ 壳预设 `stripFor`（仅 `preset`）；④ 手动 `titleBarStripPx`（仅 `custom`）；⑤ 0。驱动 `body[data-dsh-title-bar-compat]` + `--dsh-title-bar-strip`。
+  - **四方案**：`auto`（默认，只信 WCO——"为某壳做的兼容在另一个壳会再坏"，核心不做壳专属分支）/ `web`（强制 0）/ `preset`（`src/client/shell-presets.ts`，准入：issue/PR 提及且 GitHub ⭐>100；命中环境显示「已检测」后缀，绝不自动启用）/ `custom`（用户 CSS + 手动 px，齿轮弹窗）。
+  - **迁移**：`titleBarScheme` 无默认值；旧文档已有值（`titleBarCompat === true` 或 `titleBarStripPx` 非 40）→ 迁 `custom`；干净文档 → `auto`。
+  - **用户空间 CSS**：预设/自定义 css 注入 `<style data-dsh-preset-css|data-dsh-custom-css>` 到 head 末尾（后写胜出；覆盖 JS 内联需 `!important`），fiber 卸载即移除。稳定寻址面：`[data-dsh-toggle-cluster]` / `[data-dsh-panel]` / `[data-dsh-bottom-panel]`。
+  - **拖拽区退出**：交互 chrome（`.toggleCluster` / `.toggleButton` / `.tabBar`）统一 `-webkit-app-region: no-drag`（无边框壳拖拽带吞点击，#103/#111）。
+- **z-index**：面板宿主层 25、按钮簇 45——低于 DSH ui-cordis 插件面板（30）与浮层栈（100/1000+），浮层天然盖住侧边栏。
+
+### 12.2 注意事项
+
+- 类名是 CSS Modules 哈希，**不是契约**；精确命中用 `[data-dsh-better-sidebar]` + 子串类名（`[class*='panel']`）或 DOM 结构。
+- 改动本契约必须同步本文档、设计文档与 `tests/theme.spec.ts`。
+
+---
+
+## 13. 完整最小示例
 
 假设插件 `my-plugin` 要加一个 "Database 浏览器" tab + `.csv` 文件预览器。
 

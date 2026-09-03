@@ -206,6 +206,18 @@ describe('open-path interception wiring', () => {
     const remoteSession = fakeNamespaceService(hostOpened)
     const ctx = fakeCtx(opened, remoteSession)
     const store = createSidebarStore()
+    const restore = registerOpenPathInterception(ctx as unknown as Context, store)
+
+    // Before the namespace mounts, nothing is wrapped.
+    expect(Object.getOwnPropertyDescriptor(remoteSession, 'openWorkspacePath')?.get).toBeDefined()
+    ctx.mount()
+
+  it('registers through ctx.inject and routes chat opens into the editor tab', async () => {
+    const opened: Array<Record<string, unknown>> = []
+    const hostOpened: string[] = []
+    const remoteSession = fakeNamespaceService(hostOpened)
+    const ctx = fakeCtx(opened, remoteSession)
+    const store = createSidebarStore()
     store.setPrefs({ ...store.getPrefs(), interceptOpenPath: true })
     const restore = registerOpenPathInterception(ctx as unknown as Context, store)
 
@@ -268,7 +280,6 @@ describe('open-path interception wiring', () => {
       },
     }
     const store = createSidebarStore()
-    store.setPrefs({ ...store.getPrefs(), interceptOpenPath: true })
     registerOpenPathInterception(ctx as unknown as Context, store)
     ctx.remount()
     await current.openWorkspacePath({ path: '/w/src/a.ts' })
