@@ -47,6 +47,21 @@ import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
+/**
+ * The package name, read rather than spelled.
+ *
+ * The official client bundle must register under the package name: the
+ * client-modules compose contract looks the bundle up by it. Spelling the name
+ * here meant a rename in package.json silently produced a bundle whose id no
+ * longer matched the package that shipped it -- the plugin mounted and never
+ * appeared. Reading the same field the contract reads makes the two agree by
+ * construction instead of by reviewer diligence.
+ */
+const ROOT = dirname(fileURLToPath(import.meta.url))
+const PACKAGE_NAME: string = JSON.parse(
+  await readFile(join(ROOT, 'package.json'), 'utf8'),
+).name
+
 const require = createRequire(import.meta.url)
 
 /** Node builtins must never survive into the browser module-loader factory. */
@@ -341,7 +356,7 @@ export default [
     clean: false,
   },
   // Official profile channel: bundle id = package name (package.json `name`).
-  clientBundle('dsh-better-sidebar', 'client.js'),
+  clientBundle(PACKAGE_NAME, 'client.js'),
   // Third-party registry channel: bundle id = the market manifest's id
   // (dsh.plugin.json). DSH never reads that file — the official profile
   // channel is the package-name bundle above, declared through
