@@ -593,7 +593,10 @@ export function TextEditor(props: FileViewerProps) {
     // `mtimeMs`; a file that changed on disk since is REFUSED (fs-conflict)
     // instead of clobbering whatever wrote it (the model, another tab, an
     // external editor). `null` = the file did not exist when loaded.
-    api.fsWrite(scope, path, view.state.doc.toString(), mtimeRef.current ?? null).then((result) => {
+    // Captured before the write: the draft is cleared on success, and the length is
+    // reported to save consumers as a breadcrumb.
+    const writtenText = view.state.doc.toString()
+    api.fsWrite(scope, path, writtenText, mtimeRef.current ?? null).then((result) => {
       savingRef.current = false
       // Adopt the fresh baseline the host reports (absent on a stat failure —
       // keep the old one, the next save just re-checks).
@@ -602,6 +605,23 @@ export function TextEditor(props: FileViewerProps) {
       setDirty(false)
       setConflict(false)
       setSaveState('saved')
+      // Announce the save to whoever registered for it. This runs AFTER the write
+      // landed and is deliberately fire-and-forget: the editor has no interest in
+      // what a consumer does with the fact, and a consumer that throws or is slow
+      // must not turn a completed save into a failed-looking one. Each registered
+      // system contributes the identity it resolved for this moment, so the event
+      // can say "who" in every vocabulary that registered.
+      //
+      // `text` is captured before the promise chain: the draft has just been
+      // cleared, and the length is a breadcrumb for the audit trail rather than a
+      // re-read of the file.
+      try {
+        props.ctx.get('betterSidebar')?.emitFileSaved(path, scope.sessionId, writtenText.length)
+      } catch (error) {
+        // The sidebar service is optional from the editor's point of view; a host
+        // that does not publish it simply has no consumers.
+        console.error('[dsh-better-sidebar] save announcement failed:', error)
+      }
       // The saved bytes are a new revision of the uncommitted diff: re-read
       // the change set (the file's XY status code usually stays the same, so
       // the status store alone would never wake the gutter up again).
