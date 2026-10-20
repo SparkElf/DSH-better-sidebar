@@ -526,6 +526,24 @@ function sameScope(armed: FsScope | undefined, live: FsScope | undefined): boole
 export function FileTree(props: {
   sessionId: string
   cwd: string | undefined
+  /**
+   * Render the levels under `cwd` WITHOUT the row for `cwd` itself.
+   *
+   * The root row is right for the workbench, where `cwd` is a workspace the reader
+   * navigates from. A surface already scoped to one directory (the knowledge base)
+   * shows that directory's contents as its tree, so a row repeating the directory's
+   * own name is a level of nesting the reader never asked for. Expansion, loading
+   * and every action are unaffected -- only that one row goes.
+   */
+  hideRoot?: boolean
+  /**
+   * Offer the multi-row selection bar (copy paths / delete / clear).
+   *
+   * The workbench wants it. A read-mostly surface that opens one document at a time
+   * does not: the bar answers Ctrl/Shift-click gestures its readers never make, and
+   * it costs a row of height whenever a stray click lands on the body. Defaults on.
+   */
+  selectionBar?: boolean
   expanded: string[]
   /** Files highlighted by a "Show in folder" reveal (absolute paths). */
   revealed: string[]
@@ -2221,20 +2239,22 @@ export function FileTree(props: {
           {archiveBusy && (
             <Notice kind="loading" tone="inline" role="status">{t('loading')}</Notice>
           )}
-          <RootRow
-            path={root}
-            iconsVersion={iconsVersion}
-            service={service}
-            dropTarget={dropTarget === root}
-            gitChanged={gitStatus.dirHasChanges(root)}
-            copied={copiedPath === root}
-            actions={actions}
-          />
-          {renderLevel(root, 1)}
+          {propsRef.current.hideRoot === true ? null : (
+            <RootRow
+              path={root}
+              iconsVersion={iconsVersion}
+              service={service}
+              dropTarget={dropTarget === root}
+              gitChanged={gitStatus.dirHasChanges(root)}
+              copied={copiedPath === root}
+              actions={actions}
+            />
+          )}
+          {renderLevel(root, propsRef.current.hideRoot === true ? 0 : 1)}
           {/* The selection bar closes the scroll container (sticky bottom): it
               sits BELOW every row, never over them, and its appearance never
               shifts the tree the way a top bar did. */}
-          {selected.size > 0 && (
+          {selected.size > 0 && propsRef.current.selectionBar !== false && (
             <div className={css.explorerSelectionBar} role="toolbar" aria-label={t('filesSelected', { count: selected.size })}>
               <span className={css.explorerSelectionText}>{t('filesSelected', { count: selected.size })}</span>
               <span className={css.explorerSelectionActions}>
