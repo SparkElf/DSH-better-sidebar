@@ -362,10 +362,12 @@ interface DirRowProps {
   gitChanged: boolean
   copied: boolean
   actions: RowActions
+  /** Override the printed row name; absent prints the entry's own name. */
+  dirLabel?: (path: string, entry: FsEntry) => string
 }
 
 const DirRow = memo(function DirRow(props: DirRowProps): ReactNode {
-  const { entry, chain, depth, expanded, iconsVersion, service, selected, revealed, dropTarget, gitChanged, copied, actions } = props
+  const { entry, chain, depth, expanded, iconsVersion, service, selected, revealed, dropTarget, gitChanged, copied, actions, dirLabel } = props
   void iconsVersion
   // The row's ACTIONS target the chain's deepest link: that is the directory
   // the user sees expanded (`a/b/c`), so dropping into it, renaming it or
@@ -406,7 +408,9 @@ const DirRow = memo(function DirRow(props: DirRowProps): ReactNode {
     >
       {icon}
       <span className={clsx(css.explorerName, gitChanged && css.explorerDirChanged)}>
-        {chain.length > 1 ? chain.map(link => link.name).join('/') : entry.name}
+        {chain.length > 1
+          ? chain.map(link => dirLabel === undefined ? link.name : dirLabel(link.path, link)).join('/')
+          : (dirLabel === undefined ? entry.name : dirLabel(entry.path, entry))}
       </span>
       {entry.isSymlink && <IconLinkOutlineRegular size={12} className={css.explorerSymlink} />}
       {entry.mtimeMs !== undefined && (
@@ -544,6 +548,22 @@ export function FileTree(props: {
    * it costs a row of height whenever a stray click lands on the body. Defaults on.
    */
   selectionBar?: boolean
+  /**
+   * Render one directory's row name for a different audience than the disk name.
+   *
+   * The rows print `entry.name` because that is what the path IS, and for a
+   * workbench tree that is also what the reader wants to see. A surface whose
+   * top-level folders are a vocabulary of its own -- the knowledge base's three
+   * buckets name WHO may read the folder, while the folders themselves are called
+   * `global` / `department` / `personal` on disk -- needs to say the audience
+   * without renaming anything: the directory name is also a path segment the
+   * deployment shares, so it cannot be edited to suit one caller's language.
+   *
+   * Absent means "print the entry name", so every existing caller is unaffected.
+   * The callback receives the absolute path (stable, and what a caller keys on)
+   * and the entry, so it can decide per row rather than per level.
+   */
+  dirLabel?: (path: string, entry: FsEntry) => string
   expanded: string[]
   /** Files highlighted by a "Show in folder" reveal (absolute paths). */
   revealed: string[]
@@ -2161,6 +2181,7 @@ export function FileTree(props: {
                   gitChanged={gitStatus.dirHasChanges(entry.path)}
                   copied={copiedPath === entry.path}
                   actions={actions}
+                  dirLabel={propsRef.current.dirLabel}
                 />
                 {isOpen && renderLevel(tail.path, depth + 1)}
               </div>
