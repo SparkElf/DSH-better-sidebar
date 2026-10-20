@@ -42,6 +42,7 @@
   },
   "packageManager": "pnpm@11.8.0",
   "dsh": {
+    "installName": "dsh-better-sidebar",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },

@@ -122,11 +122,21 @@ describe.skipIf(!libBuilt)('registry manifest consistency (dsh.plugin.json)', ()
     expect(existsSync(resolve(ROOT, manifest.client!.main!))).toBe(true)
   })
 
-  it('the registry bundle registers exactly the manifest id and the official bundle the package name (no swap)', () => {
+  it('the registry bundle registers exactly the manifest id and the official bundle the INSTALL name (no swap)', () => {
     const registryId = bundleId(manifest.client!.main!)
     expect(registryId).toBe(manifest.id)
-    expect(bundleId('lib/client.js')).toBe(pkg.name)
-    expect(registryId).not.toBe(pkg.name)
+    // The compose contract keys on the name the profile installed the package AS,
+    // not the name it was published under. A consumer may install this package
+    // through an npm alias — the deployment writes
+    // `"dsh-better-sidebar": "npm:@sparkelf/dsh-better-sidebar@…"` — and then the
+    // directory, the bundle-stack entry and the id the loader waits for are all
+    // the unscoped name. Registering the published name made the loader report
+    // "loaded without registering" and left every betterSidebar consumer pending.
+    const installName = (pkg as { dsh?: { installName?: string } }).dsh?.installName ?? pkg.name
+    expect(bundleId('lib/client.js')).toBe(installName)
+    expect(registryId).not.toBe(installName)
+    // The two ids name different channels and must never collide.
+    expect(registryId).not.toBe(bundleId('lib/client.js'))
   })
 
   it('the lazy chunk bundles exist and assign their global registry slots (served by /sidebar/bundle)', () => {
