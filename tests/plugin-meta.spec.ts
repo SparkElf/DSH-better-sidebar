@@ -119,7 +119,10 @@ describe('DSH plugin presentation metadata', () => {
     const dir = mkdtempSync(join(tmpdir(), 'plugin-meta-pack-'))
     try {
       execFileSync('pnpm', ['pack', '--pack-destination', dir], { cwd: ROOT, stdio: 'pipe', shell: process.platform === 'win32' })
-      const contents = execFileSync('tar', ['-tzf', `${pkg.name}-${pkg.version}.tgz`], { cwd: dir, encoding: 'utf8' })
+      // npm flattens the scope into the filename (`@scope/pkg` -> `scope-pkg`),
+      // so a scoped package does not pack under its literal name.
+      const packed = `${pkg.name.replace(/^@/, '').replace('/', '-')}-${pkg.version}.tgz`
+      const contents = execFileSync('tar', ['-tzf', packed], { cwd: dir, encoding: 'utf8' })
       const files = contents.split('\n')
       expect(files, `${ICON} must be published`).toContain(`package/${ICON}`)
       for (const [name] of locales()) {
