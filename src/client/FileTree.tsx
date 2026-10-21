@@ -527,6 +527,47 @@ function sameScope(armed: FsScope | undefined, live: FsScope | undefined): boole
     && armed.sessionId === live.sessionId && armed.cwd === live.cwd
 }
 
+/**
+ * One row a caller appends to the file tree's context menu.
+ *
+ * The menu is the tree's own: its rows, its container, its hover and keyboard
+ * behaviour. A caller with a row to add therefore hands over DATA rather than a
+ * second menu, so the appended row is indistinguishable from a native one and
+ * the native rows keep their order, wording and handlers untouched.
+ *
+ * The row is a menu item, not a submenu parent: `onSelect` runs when the row is
+ * chosen, and the menu closes the way it does for any other row.
+ */
+export interface FileTreeMenuItem {
+  /** Row identity. Must not collide with a native id, or selecting it would run the native action. */
+  id: string
+  /** Visible label, already localized by the caller. */
+  label: string
+  /**
+   * Leading 14px glyph, the same slot the native rows use.
+   *
+   * Optional so a caller following the minimal contract needs nothing, but the
+   * menu lays its rows out with `display:flex` and a gap: a row WITHOUT an icon
+   * starts 20px left of every native row above it, which reads as a different
+   * list. Pass one, or accept that offset deliberately.
+   */
+  icon?: ReactNode
+  /**
+   * Run the caller's action for the row that was right-clicked.
+   *
+   * `relPath` is relative to the tree's `cwd` — the same spelling the
+   * "copy relative path" row produces — and is the path as given when `cwd` is
+   * absent or the row lies outside it.
+   */
+  onSelect: (target: { relPath: string; isDir: boolean }) => void
+  /**
+   * Whether this row applies to the right-clicked entry. Returning false (or
+   * omitting the row for a directory, etc.) draws nothing at all — not a
+   * disabled row, which would advertise an action that cannot run.
+   */
+  when?: (target: { relPath: string; isDir: boolean }) => boolean
+}
+
 export function FileTree(props: {
   sessionId: string
   cwd: string | undefined
@@ -573,6 +614,17 @@ export function FileTree(props: {
   onOpenFileNewTab?: (path: string) => void
   /** Context-menu "open to the side" (file rows; absent → no entry). */
   onOpenFileSide?: (path: string) => void
+  /**
+   * Rows appended to the end of the context menu, after the native ones.
+   *
+   * Absent means "no rows", which is why every existing caller renders exactly
+   * what it rendered before: the array is empty and no separator is drawn.
+   * When it has an applicable row, a separator precedes the group so the
+   * caller's actions read as a group of their own rather than as a native
+   * continuation — and that separator is omitted when `when` filters every row
+   * out, so a caller never leaves a trailing hairline.
+   */
+  extraMenuItems?: readonly FileTreeMenuItem[]
   /**
    * The host's open-in-app handle (EditorHost builds it and injects it).
    * Absent, or reporting the host cannot hand paths to the desktop, hides the
@@ -677,6 +729,19 @@ export function FileTree(props: {
   const dataRef = useRef(data)
   /** Bumped whenever the cache is wiped: a response from an older generation is dropped. */
   const generationRef = useRef(0)
+/**
+ * The context menu's native row ids.
+ *
+ * A caller's appended row is matched against these before its own `onSelect`
+ * runs, so an id in this set has to be refused: letting it through would make
+ * a caller's row answer the native id and take a shipped action away.
+ */
+const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
+  'open-new-tab', 'open-side', 'download', 'upload-here', 'new-folder', 'new-file',
+  'archive-selection', 'relative', 'absolute', 'rename', 'delete',
+  'reveal-in-file-manager',
+])
+
   /** The row whose path was just copied ("copied" label replaces its button). */
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   /** Open context menu: the row path (and whether it is a directory) plus the cursor position. */
@@ -1751,6 +1816,38 @@ export function FileTree(props: {
     return []
   }
 
+  /**
+   * The caller's appended rows, as menu entries.
+   *
+   * `relPath` is resolved here rather than in the caller: the tree is the only
+   * party that knows `cwd`, and the spelling has to match the "copy relative
+   * path" row the user already reads in this same menu. An entry outside the
+   * tree (or a tree with no `cwd`) passes through `relativeTo` unchanged,
+   * which is also what that native row does.
+   *
+   * The group's separator is prepended only when at least one row survives
+   * `when`, so a caller whose rows do not apply to this entry leaves the menu
+   * exactly as it was — no stray hairline at the bottom.
+   */
+  const extraRows: MenuEntry[] = (() => {
+    const target = rowMenu
+    const items = props.extraMenuItems
+    if (target === null || items === undefined || items.length === 0) return []
+    // A caller id equal to a native one would SHADOW that native action on
+    // select, which is exactly the "the original feature is gone" failure this
+    // prop exists to avoid. Refuse the whole group instead of silently
+    // winning: the caller sees nothing appended, which points at their mistake,
+    // rather than a native row that stopped working.
+    if (items.some(item => NATIVE_MENU_IDS.has(item.id))) return []
+    const relPath = relativeTo(cwd ?? '', target.path)
+    const hit = { relPath, isDir: target.isDir }
+    const rows = items
+      .filter(item => item.when === undefined || item.when(hit))
+      .map(item => ({ id: item.id, label: item.label, ...(item.icon === undefined ? {} : { icon: item.icon }) }))
+    if (rows.length === 0) return []
+    return [{ id: 'extra-items-sep', type: 'separator' } as MenuEntry, ...rows]
+  })()
+
   /** Download a file through the host route (raw bytes, binary-safe). */
   const downloadFile = (path: string): void => {
     const url = downloadUrl({ sessionId, cwd }, path)
@@ -2396,6 +2493,11 @@ export function FileTree(props: {
                 { id: 'delete', label: t('delete'), icon: <IconTrashOutlineRegular size={14} />, danger: true },
               ]
             : []),
+          // The caller's own rows, LAST: the native list keeps the order it has
+          // always had, and anything appended is visibly a group of its own. The
+          // separator belongs to that group, so it is only drawn when a row
+          // survives `when` — a filtered-out group leaves no trailing hairline.
+          ...extraRows,
         ]}
         onSelect={(id) => {
           const target = rowMenu
@@ -2464,6 +2566,15 @@ export function FileTree(props: {
             const armed = scopeOf(propsRef.current)
             if (armed === undefined) return
             setConfirmDelete({ path: target.path, isDir: target.isDir, name: baseName(target.path), scope: armed })
+            return
+          }
+          // The caller's rows: matched against the array the menu was built
+          // from, so a caller that swaps its rows between open and select still
+          // gets the row it named. Anything unmatched falls through to the
+          // native copy rows below, exactly as before.
+          const extra = propsRef.current.extraMenuItems?.find(item => item.id === id)
+          if (extra !== undefined) {
+            extra.onSelect({ relPath: relativeTo(cwd ?? '', target.path), isDir: target.isDir })
             return
           }
           copyPath(
