@@ -199,6 +199,7 @@ export const vi: Record<string, string> = {
   searchGo: 'Đi',
   binary: 'Tệp nhị phân, không xem trước được',
   loading: 'Đang tải…',
+  filterNoMatch: 'Không có tệp phù hợp',
   error: 'Tải thất bại',
   retry: 'Thử lại',
   notRepo: 'Thư mục hiện tại không phải repo git',

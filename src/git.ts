@@ -692,7 +692,7 @@ export async function branches(cwd: string, selected?: string): Promise<{ curren
  *  the worktree changes and `--work-tree=…` redirected the checkout. Same
  *  guard as show / commitDiff / revert / cherryPick (4100e16). */
 export async function checkout(cwd: string, branch: string, selected?: string): Promise<void> {
-  await runGit(await repoRoot(cwd, selected), ['checkout', '--end-of-options', branch])
+  await runGit(await repoRoot(cwd, selected), ['switch', '--end-of-options', branch])
 }
 
 /** Recent commit history (newest first), lazily pageable via skip/count. */

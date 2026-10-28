@@ -231,8 +231,12 @@ describe('/sidebar/html streams without a size cap', () => {
     const url = new URL(encodeHtmlUrl('s', target), origin)
     const response = await fetch(url, { headers: { host: '127.0.0.1' } })
     expect(response.status).toBe(200)
+    // `allow-same-origin` is deliberate: without it the document sits in an opaque origin,
+    // its requests carry `Origin: null`, and the sidebar's own fence refuses them — which
+    // made a preview that had already answered 200 render as a blank frame. The isolation
+    // that still matters here is `sandbox` itself plus `object-src 'none'`.
     expect(response.headers.get('content-security-policy'))
-      .toBe("sandbox allow-scripts allow-popups allow-downloads allow-modals; object-src 'none'")
+      .toBe("sandbox allow-scripts allow-same-origin allow-popups allow-downloads allow-modals; object-src 'none'")
     expect(Number(response.headers.get('content-length'))).toBeGreaterThan(20 * 1024 * 1024)
     await response.body!.cancel()
   })

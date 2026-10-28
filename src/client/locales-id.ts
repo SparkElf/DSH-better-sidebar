@@ -197,6 +197,7 @@ export const id: Record<string, string> = {
   searchGo: 'Buka',
   binary: 'Berkas biner, pratinjau tidak tersedia',
   loading: 'Memuat…',
+  filterNoMatch: 'Tidak ada berkas yang cocok',
   error: 'Gagal memuat',
   retry: 'Coba lagi',
   notRepo: 'Direktori ini bukan repositori git',

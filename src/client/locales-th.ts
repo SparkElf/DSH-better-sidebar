@@ -199,6 +199,7 @@ export const th: Record<string, string> = {
   searchGo: 'ไป',
   binary: 'ไฟล์ไบนารี ไม่สามารถพรีวิวได้',
   loading: 'กำลังโหลด…',
+  filterNoMatch: 'ไม่พบไฟล์ที่ตรงกัน',
   error: 'โหลดล้มเหลว',
   retry: 'ลองอีกครั้ง',
   notRepo: 'ไดเรกทอรีนี้ไม่ใช่ git repository',

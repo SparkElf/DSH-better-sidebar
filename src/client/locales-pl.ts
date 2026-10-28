@@ -201,6 +201,7 @@ export const pl: Record<string, string> = {
   searchGo: 'Przejdź',
   binary: 'Plik binarny, podgląd niedostępny',
   loading: 'Ładowanie…',
+  filterNoMatch: 'Brak pasujących plików',
   error: 'Ładowanie nie powiodło się',
   retry: 'Ponów',
   notRepo: 'Ten katalog nie jest repozytorium git',

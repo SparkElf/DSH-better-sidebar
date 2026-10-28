@@ -191,6 +191,7 @@ export const ko: Record<string, string> = {
   searchGo: '이동',
   binary: '이진 파일이라 미리보기를 할 수 없습니다',
   loading: '불러오는 중…',
+  filterNoMatch: '일치하는 파일이 없습니다',
   error: '불러오기 실패',
   retry: '다시 시도',
   notRepo: '현재 디렉터리는 git 저장소가 아닙니다',

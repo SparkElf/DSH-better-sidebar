@@ -46,6 +46,15 @@ export interface SidebarFsEntry {
    * row would show.
    */
   mtimeMs?: number
+  /**
+   * File size in bytes, or undefined for a directory or a failed probe.
+   *
+   * Carried with the modified time because both come from the SAME `stat`: the explorer's
+   * "sort by size" needs a number per row, and a second probe would double this listing's
+   * syscalls for a value already in hand. A directory reports its inode size, which says
+   * nothing about its contents, so it is left absent rather than sorted as a real size.
+   */
+  size?: number
 }
 
 /** One listed level. */
@@ -339,6 +348,7 @@ async function probeModifiedTimes(rows: SidebarFsEntry[], gate?: ProbeGate, conc
   await forEachRow(rows, concurrency, async (row) => {
     const info = await runProbe(gate, () => stat(row.path)).catch(() => undefined)
     row.mtimeMs = info?.mtimeMs
+    row.size = row.isDir ? undefined : info?.size
   })
 }
 

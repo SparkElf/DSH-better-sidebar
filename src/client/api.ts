@@ -52,6 +52,8 @@ export interface FsEntry {
   compact?: boolean
   /** Last-modified time in milliseconds; absent when the host could not read it. */
   mtimeMs?: number
+  /** File size in bytes; absent for directories and for a failed probe. */
+  size?: number
 }
 
 /** One level of a `fs.trees` batch: a listing, or that level's failure. */

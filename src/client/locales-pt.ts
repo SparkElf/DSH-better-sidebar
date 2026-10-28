@@ -182,6 +182,7 @@ export const pt: Record<string, string> = {
   searchGo: 'Ir',
   binary: 'Arquivo binário, pré-visualização indisponível',
   loading: 'Carregando…',
+  filterNoMatch: 'Nenhum arquivo correspondente',
   error: 'Falha ao carregar',
   retry: 'Tentar novamente',
   notRepo: 'Este diretório não é um repositório git',

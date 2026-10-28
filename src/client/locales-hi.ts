@@ -199,6 +199,7 @@ export const hi: Record<string, string> = {
   searchGo: 'जाएँ',
   binary: 'बाइनरी फ़ाइल, पूर्वावलोकन अनुपलब्ध',
   loading: 'लोड हो रहा…',
+  filterNoMatch: 'कोई मेल खाती फ़ाइल नहीं',
   error: 'लोड विफल',
   retry: 'पुनः प्रयास',
   notRepo: 'यह डायरेक्टरी एक git रिपॉज़िटरी नहीं है',

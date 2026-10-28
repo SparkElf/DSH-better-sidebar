@@ -199,6 +199,7 @@ export const ja: Record<string, string> = {
   searchGo: '移動',
   binary: 'バイナリファイル、プレビュー不可',
   loading: '読み込み中…',
+  filterNoMatch: '一致するファイルがありません',
   error: '読み込みに失敗',
   retry: '再試行',
   notRepo: 'このディレクトリは git リポジトリではありません',

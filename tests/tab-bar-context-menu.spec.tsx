@@ -37,8 +37,15 @@ function stubZh(): void {
   })
 }
 
+/**
+ * The menu's rows in order.
+ *
+ * The batch operations lead and the single-tab close follows after a separator: they act on
+ * the whole strip, and a reader reaching for "close" must not find "close all" where their
+ * thumb already is.
+ */
 const MENU_LABELS = [
-  '关闭', '关闭其他页签', '关闭左侧页签', '关闭右侧页签', '关闭全部页签', '在资源管理器中定位',
+  '关闭其他页签', '关闭左侧页签', '关闭右侧页签', '关闭全部页签', '关闭', '在资源管理器中定位',
 ]
 
 function mountBar(tabs: SidebarTab[], opts: {
@@ -135,6 +142,9 @@ describe('TabBar right-click context menu', () => {
       act(() => { event = rightClick(tabEls[1]!) })
       expect(event!.defaultPrevented).toBe(true)
       expect(menuItems().map(item => item.textContent)).toEqual(MENU_LABELS)
+      // A hairline separates the batch group from the single-tab close. Asserted from the
+      // DOM because the distinction is the point: same menu, two kinds of action.
+      expect(document.querySelectorAll('[role="separator"]').length).toBeGreaterThan(0)
       expect(onActivate).not.toHaveBeenCalled()
     } finally {
       unmount()
@@ -146,7 +156,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[0]!.click() })
+      act(() => { menuItems()[4]!.click() })
       expect(onClose).toHaveBeenCalledTimes(1)
       expect(onClose).toHaveBeenCalledWith('t2')
       expect(menuItems()).toHaveLength(0)
@@ -160,7 +170,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[0]!.click() })
+      act(() => { menuItems()[4]!.click() })
       expect(onClose).toHaveBeenCalledTimes(1)
       expect(onClose).toHaveBeenCalledWith('t2')
       expect(menuItems()).toHaveLength(0)
@@ -174,7 +184,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[1]!.click() })
+      act(() => { menuItems()[0]!.click() })
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t1', 't3', 't4'])
       expect(onClose).not.toHaveBeenCalledWith('t2')
       expect(menuItems()).toHaveLength(0)
@@ -188,7 +198,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[2]!) })
-      act(() => { menuItems()[2]!.click() })
+      act(() => { menuItems()[1]!.click() })
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t1', 't2'])
       expect(menuItems()).toHaveLength(0)
     } finally {
@@ -201,7 +211,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[3]!.click() })
+      act(() => { menuItems()[2]!.click() })
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t3', 't4'])
       expect(menuItems()).toHaveLength(0)
     } finally {
@@ -214,7 +224,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[4]!.click() })
+      act(() => { menuItems()[3]!.click() })
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t1', 't2', 't3', 't4'])
       expect(menuItems()).toHaveLength(0)
     } finally {
@@ -228,7 +238,7 @@ describe('TabBar right-click context menu', () => {
     try {
       act(() => { rightClick(tabEls[0]!) })
       // The file tab's row is live; the pane's other tab has no file.
-      expect(menuDisabled()).toEqual([false, false, true, false, false, false])
+      expect(menuDisabled()).toEqual([false, true, false, false, false, false])
       act(() => { menuItems()[5]!.click() })
       expect(onRevealInFileManager).toHaveBeenCalledTimes(1)
       expect(onRevealInFileManager).toHaveBeenCalledWith('/repo/src/a.ts')
@@ -248,10 +258,13 @@ describe('TabBar right-click context menu', () => {
     try {
       act(() => { rightClick(single.tabEls[0]!) })
       // The Menu renders each row as a disabled <button role="menuitem">.
-      // Close all stays live (it always has at least the right-clicked tab).
-      expect(menuDisabled()).toEqual([false, true, true, true, false, true])
+      // With ONE tab every batch row is dead except "close all": there is nothing else to
+      // close, and the single tab sits at both ends of the strip, so close-left and
+      // close-right have nothing to act on either. Close all stays live (the pane always
+      // holds at least the right-clicked tab).
+      expect(menuDisabled()).toEqual([true, true, true, false, false, true])
       // Clicking the disabled row must not close anything.
-      act(() => { menuItems()[1]!.click() })
+      act(() => { menuItems()[0]!.click() })
       expect(single.onClose).not.toHaveBeenCalled()
     } finally {
       single.unmount()
@@ -260,9 +273,9 @@ describe('TabBar right-click context menu', () => {
     const four = mountBar(fourTabs())
     try {
       act(() => { rightClick(four.tabEls[0]!) })
-      expect(menuDisabled()).toEqual([false, false, true, false, false, true])
+      expect(menuDisabled()).toEqual([false, true, false, false, false, true])
       act(() => { rightClick(four.tabEls[3]!) })
-      expect(menuDisabled()).toEqual([false, false, false, true, false, true])
+      expect(menuDisabled()).toEqual([false, false, true, false, false, true])
     } finally {
       four.unmount()
     }
@@ -276,7 +289,7 @@ describe('TabBar right-click context menu', () => {
       act(() => { rightClick(tabEls[1]!) })
       // The changes tab carries no file of its own (its diff ref is
       // repo-relative, not a path the host could reveal).
-      expect(menuDisabled()).toEqual([false, false, false, true, false, true])
+      expect(menuDisabled()).toEqual([false, false, true, false, false, true])
       act(() => { menuItems()[5]!.click() })
       expect(onRevealInFileManager).not.toHaveBeenCalled()
       expect(onClose).not.toHaveBeenCalled()

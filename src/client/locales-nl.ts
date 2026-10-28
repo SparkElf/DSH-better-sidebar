@@ -197,6 +197,7 @@ export const nl: Record<string, string> = {
   searchGo: 'Ga',
   binary: 'Binair bestand, geen voorbeeld beschikbaar',
   loading: 'Laden…',
+  filterNoMatch: 'Geen overeenkomende bestanden',
   error: 'Laden mislukt',
   retry: 'Opnieuw proberen',
   notRepo: 'Deze map is geen git-repository',

@@ -199,6 +199,7 @@ export const tr: Record<string, string> = {
   searchGo: 'Git',
   binary: 'İkili dosya, önizleme kullanılamıyor',
   loading: 'Yükleniyor…',
+  filterNoMatch: 'Eşleşen dosya yok',
   error: 'Yükleme başarısız',
   retry: 'Yeniden dene',
   notRepo: 'Bu dizin bir git deposu değil',

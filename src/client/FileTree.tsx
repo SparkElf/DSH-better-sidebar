@@ -56,6 +56,7 @@ import { VscFolderOpened, VscLinkExternal, VscPin, VscPinned } from 'react-icons
 import { api, archiveBuild, archiveDownloadUrl, archiveStatus, downloadUrl, SidebarApiError, type FsEntry, type FsLevel } from './api.ts'
 import { compactChain, compactLoadTargets } from './file-tree-compact.ts'
 import { DEFAULT_FILE_TREE_SORT, sortEntries, type FileTreeSort } from './file-tree-sort.ts'
+import { filterLevel, normaliseNeedle, type FilterableEntry } from './listing-filter.ts'
 import { FS_TREES_MAX_PATHS } from '../fs-batch.ts'
 import { builtinFileIcon, builtinFolderIcon } from './file-icons.tsx'
 import { IconUploadOutline16, IconVscode16 } from './icons.tsx'
@@ -653,6 +654,21 @@ export function FileTree(props: {
    *  them (excluded rows never arrive), so changing the list wipes the level
    *  cache and reloads — the rows themselves need no client-side filter. */
   exclude?: readonly string[]
+  /**
+   * Narrow the visible rows to names containing this text.
+   *
+   * Applied to the levels ALREADY LOADED: nothing is re-requested, so typing in the field
+   * costs no round trip. Matching is `listing-filter.ts`'s rule set, shared with the
+   * knowledge listing so both surfaces narrow identically.
+   *
+   * A directory is kept when it matches, when anything below it matches, or when an
+   * ancestor matched -- a hit inside a collapsed folder would otherwise be invisible. The
+   * rows that survive therefore form the same tree, only thinner; expansion state is left
+   * untouched, so clearing the term restores exactly what was on screen.
+   *
+   * Absent or blank means "no filtering", which is the behaviour every other caller gets.
+   */
+  nameFilter?: string
   /** A rename landed (old row path → new path): the caller retargets open tabs. */
   onPathRenamed?: (oldPath: string, newPath: string) => void
   /** A delete landed: the caller closes tabs at or under the removed path. */
@@ -703,7 +719,7 @@ export function FileTree(props: {
   const {
     sessionId, cwd, expanded, revealed, onOpenFileNewTab, onOpenFileSide,
     openInApp, openWithTargets, openWithPinned, openWithSsh, onOpenWith, onToggleOpenWithPin,
-    openWithShowPluginTargets, exclude,
+    openWithShowPluginTargets, exclude, nameFilter,
     onPathRenamed, onPathDeleted, refreshTick, onUploadRequest, busy, hidden, visible, service,
   } = props
   const sort = props.sort ?? DEFAULT_FILE_TREE_SORT
@@ -2040,16 +2056,40 @@ const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
    * `sortEntries` copies (the level cache keeps the host's own order and is
    * never reordered in place).
    */
+  /** The caller's filter, normalised once per change. */
+  const needle = normaliseNeedle(nameFilter ?? '')
+
   const entriesFor = useMemo(() => {
     const cache = new Map<string, readonly FsEntry[]>()
+    /**
+     * Every loaded level as a `children` map for the filter.
+     *
+     * Built from the level cache rather than from what is on screen: the filter has to see
+     * the children of a COLLAPSED folder to know whether it should stay visible. Unloaded
+     * levels are simply absent, which the rule set treats as "judge this row by its own
+     * name" -- the same answer the reader would get after expanding it.
+     */
+    /** The loaded children of one directory row, for the filter's descent. */
+    const childrenOf = (entry: FsEntry): readonly FsEntry[] | undefined => {
+      if (!entry.isDir) return undefined
+      const level = data[entry.path]
+      // `undefined` (not yet read) is different from `[]` (read, empty): only the former
+      // means "cannot be searched", so the distinction is preserved here.
+      return level?.entries === undefined ? undefined : sortEntries(level.entries, sort)
+    }
+    const filteredFor = (dir: string): readonly FsEntry[] => {
+      const rows = sortEntries(data[dir]?.entries ?? [], sort)
+      if (needle === '') return rows
+      return filterLevel(rows, childrenOf, needle)
+    }
     return (dir: string): readonly FsEntry[] => {
       const cached = cache.get(dir)
       if (cached !== undefined) return cached
-      const sorted = sortEntries(data[dir]?.entries ?? [], sort)
-      cache.set(dir, sorted)
-      return sorted
+      const rows = filteredFor(dir)
+      cache.set(dir, rows)
+      return rows
     }
-  }, [data, sort])
+  }, [data, sort, nameFilter])
 
   // The Shift range walks the rows the user can actually see: the level's
   // rows in the SAME order `renderLevel` draws them (the sort choice), then
@@ -2241,9 +2281,19 @@ const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
     }
     // The ORDER is the caller's choice (the header's sort control).
     const entries = entriesFor(dir)
+    // A filter that matched nothing must SAY so. Without this the body is simply empty,
+    // which is indistinguishable from a tree that failed to load -- the reader cannot tell
+    // "no document has this name" from "the tree is broken".
+    const emptyFromFilter = needle !== '' && entries.length === 0 && level.entries !== undefined
+      && level.entries.length > 0
     return (
       <>
         {head}
+        {emptyFromFilter && (
+          <div className={clsx(css.explorerRow, css.explorerMuted)} style={{ paddingLeft: depth * 22 + 6 }}>
+            {t('filterNoMatch')}
+          </div>
+        )}
         {entries.map((entry) => {
           // Fold chains (VSCode "compact folders"): a chain of dirs holding
           // exactly one real dir child each renders as ONE `a/b/c` row; the

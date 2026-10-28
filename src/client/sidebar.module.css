@@ -782,6 +782,18 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   animation: dsh-row-in 150ms var(--ds-ease-in-out);
 }
 
+/* The row's leading glyph, as a flex item.
+   `FileRow` renders the icon as a BARE <svg> (no wrapper element), so the row's own
+   flex layout owns it — and a bare SVG is a shrinkable flex item whose intrinsic
+   width yields to a long sibling. On a row whose filename is wider than the row, the
+   glyph was therefore squeezed to a few pixels while short rows looked correct.
+   Sizing it here is what keeps every row's icon identical regardless of the name. */
+.explorerRow > svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
 .explorerRow:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
@@ -2686,4 +2698,13 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A row that carries a sentence instead of a file: the filter's "nothing matched"
+   line. Same row metrics as the tree (so it sits where a row would) but dimmed
+   and not interactive -- it is an answer, not a document. */
+.explorerMuted {
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+  cursor: default;
 }
