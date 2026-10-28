@@ -1817,10 +1817,31 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
           'cache-control': 'no-cache',
           'x-content-type-options': 'nosniff',
           'referrer-policy': 'no-referrer',
-          // The sandbox directive (no allow-same-origin → opaque origin) is
-          // the previewer's security boundary even for top-level loads;
-          // object-src 'none' blocks plugin embeds.
-          'content-security-policy': "sandbox allow-scripts allow-popups allow-downloads allow-modals; object-src 'none'",
+          // ## The sandbox directive, and why `allow-same-origin` is granted
+          //
+          // This CSP is the previewer's security boundary even for top-level
+          // loads, and it is STRONGER than the iframe's `sandbox` attribute:
+          // the header governs the document wherever it is loaded, so relaxing
+          // the attribute alone changes nothing. That is why both sides had to
+          // be changed together.
+          //
+          // Without `allow-same-origin` this directive puts the document in an
+          // OPAQUE origin, which has two effects that were reported as one:
+          //
+          //  1. the document cannot render as itself, and the browser reports a
+          //     failure as "refused to connect" — which is NOT the real status;
+          //  2. every request it makes carries `Origin: null`, and the sidebar's
+          //     fence refuses a literal `null` origin (it is the sandboxed-frame
+          //     marker), so the sibling API routes answer 403.
+          //
+          // The cost, stated plainly: `allow-scripts` + `allow-same-origin` means
+          // the previewed document runs in THIS origin and can reach
+          // session-scoped APIs. Accepted here because the content is the
+          // reader's OWN uploaded knowledge-base file, served from an intranet
+          // deployment to an already-authenticated session. A deployment that
+          // ever previews HTML from an untrusted source must not reuse these
+          // tokens. `object-src 'none'` stays: plugin embeds remain blocked.
+          'content-security-policy': "sandbox allow-scripts allow-same-origin allow-popups allow-downloads allow-modals; object-src 'none'",
         })
       } catch (error) {
         writeError(res, error)

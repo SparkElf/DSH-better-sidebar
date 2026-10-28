@@ -197,6 +197,7 @@ export const ar: Record<string, string> = {
   searchGo: 'انتقال',
   binary: 'ملف ثنائي، المعاينة غير متاحة',
   loading: 'جارٍ التحميل…',
+  filterNoMatch: 'لا توجد ملفات مطابقة',
   error: 'فشل التحميل',
   retry: 'إعادة المحاولة',
   notRepo: 'هذا الدليل ليس مستودع git',

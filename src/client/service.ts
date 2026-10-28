@@ -384,6 +384,73 @@ export interface EditorToolbarControls {
 }
 
 /** Describes one file previewer (builtins register themselves too). */
+/**
+ * A system that wants to be told when a file is saved through the sidebar's editor.
+ *
+ * The sidebar owns the editor, but it does not own the meaning of an edit: a
+ * knowledge base wants an audit trail, a CMS wants a revision, a sync tool wants to
+ * push the bytes elsewhere. Each such system registers one of these, and the sidebar
+ * calls it after every successful save WITHOUT knowing what any of them do with it.
+ * That is the whole point of the indirection: the save path stays free of the
+ * consumers' concerns, and a consumer that throws cannot fail the save.
+ *
+ * Identity is part of the registration rather than something the sidebar computes,
+ * because only the registering system knows who its current actor is. A knowledge
+ * base resolves the DataOps user; another system may resolve an SSO subject. The
+ * sidebar passes that identity through verbatim in the event it emits, so each
+ * listener can record "who" in its own vocabulary.
+ */
+export interface SaveActor {
+  /** Stable key of the system this identity belongs to (e.g. `'knowledge-base'`). */
+  system: string
+  /** Opaque, system-owned handle for the person; the sidebar never interprets it. */
+  id: string
+  /** Human-readable name for a log line, when the system has one. */
+  displayName?: string
+}
+
+/** What the sidebar reports after a save has landed on disk. */
+export interface FileSavedEvent {
+  /** Absolute path of the file that was written. */
+  path: string
+  /** The session the save was made in. */
+  sessionId: string
+  /** Every registered actor, in registration order. Empty when nobody registered. */
+  actors: readonly SaveActor[]
+  /** Size of the saved text in characters (not bytes), for a cheap audit breadcrumb. */
+  length: number
+}
+
+/** A registration that answers "who is acting right now", if anyone is. */
+export interface SaveActorProvider {
+  /** Unique id of this registrant, so two registrations cannot silently collide. */
+  id: string
+  /**
+   * Resolve the current actor.
+   *
+   * Called once per save, after the bytes are on disk. Returning `undefined` means
+   * "this system has nobody to name right now" (no signed-in user, an anonymous
+   * session, a background write) and the event simply omits it rather than inventing
+   * a placeholder.
+   */
+  current: () => SaveActor | undefined
+}
+
+/**
+ * A consumer of save events.
+ *
+ * Listeners run AFTER the save has landed and are never awaited, so one that is slow
+ * or throws cannot delay or undo a write the reader already believes happened. A
+ * consumer that needs ordering against its own state should reconcile from its own
+ * data rather than assume the callback ran before anything else.
+ */
+export interface SaveListener {
+  /** Unique id of this registrant. */
+  id: string
+  /** Called once per successful save. Must not throw; a throw is caught and logged. */
+  onSaved: (event: FileSavedEvent) => void
+}
+
 export interface FileViewerDescriptor {
   /** Unique id (`'image'`, `'pdf'`, `'my-plugin:csv'`). */
   id: string
@@ -778,6 +845,38 @@ export interface BetterSidebarService {
    */
   hostRouteUrl(path: string): string
   /**
+   * Register a system that can name the person performing a save.
+   *
+   * Several may be registered at once -- the products a deployment composes are
+   * independent of each other, and each has its own directory of users. Every
+   * provider is asked on every save, and each answer that is not `undefined` is
+   * carried into {@link FileSavedEvent.actors}.
+   * @param provider - the registrar; `current` is called once per save.
+   * @returns a disposer that removes the registration.
+   */
+  registerSaveActor(provider: SaveActorProvider): () => void
+  /**
+   * Register a consumer for successful saves.
+   *
+   * Listeners are notified in registration order, after the write landed, without
+   * being awaited. A listener that throws is caught so it cannot affect the others
+   * or the save itself.
+   * @param listener - the consumer; `onSaved` receives the event.
+   * @returns a disposer that removes the registration.
+   */
+  registerSaveListener(listener: SaveListener): () => void
+  /**
+   * Announce a save that has already landed.
+   *
+   * The editor calls this after its write resolves. Exposed on the service because
+   * the editor is rendered by the host's tab machinery and reaches the service
+   * through the context, the same way every other capability here does.
+   * @param path - absolute path of the written file.
+   * @param sessionId - the session the save happened in.
+   * @param length - character count of the saved text.
+   */
+  emitFileSaved(path: string, sessionId: string, length: number): void
+  /**
    * Retire one session's "new page" dot for a tab type — the reader just
    * looked at that page. A type that is not marked is a strict no-op, so a
    * carrier can call this on every visibility change without churning the
@@ -840,7 +939,7 @@ export function matchUrlTarget(tabs: readonly TabDescriptor[], url: URL): TabDes
  * The plugin version this service instance reports. Keep in lockstep with
  * `package.json`'s version — `tests/service.spec.ts` asserts the pair.
  */
-export const SIDEBAR_SERVICE_VERSION = '0.29.0'
+export const SIDEBAR_SERVICE_VERSION = '0.29.0-sparkelf.1' 
 
 /**
  * Monotonic capability list consumers use to gate new API usage (features
@@ -906,6 +1005,61 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
   const listeners = new Set<() => void>()
   /** The native right-Sidebar write face, installed by the client half. */
   let surface: SidebarSurface | undefined
+  /**
+   * Systems that can name the person performing a save, keyed by registration id.
+   *
+   * A Map rather than a Set because `registerSaveActor` takes an id: two mounts of
+   * the same plugin (a reload, a second profile) would otherwise both linger and
+   * report two actors for one save. Registering an id twice replaces the entry,
+   * which is what a remount means.
+   */
+  const saveActors = new Map<string, SaveActorProvider>()
+  /** Consumers of successful saves, keyed by registration id for the same reason. */
+  const saveListeners = new Map<string, SaveListener>()
+
+  /**
+   * Announce a save that has already landed on disk.
+   *
+   * Called by the editor after the write resolves. Order is deliberate: the actors
+   * are resolved first (so a listener sees the identity at save time, not at
+   * delivery time), then every listener runs inside `safeCall` so one that throws
+   * cannot reach the editor's promise chain or the other listeners.
+   *
+   * @param path - absolute path of the written file.
+   * @param sessionId - session the save happened in.
+   * @param length - character count of the saved text.
+   */
+  const emitFileSaved = (path: string, sessionId: string, length: number): void => {
+    const actors: SaveActor[] = []
+    for (const provider of saveActors.values()) {
+      // A provider that throws is treated as "has nobody to name right now" rather
+      // than as a failed save: identity resolution is a courtesy to the consumers,
+      // not a precondition for the write.
+      let actor: SaveActor | undefined
+      try {
+        actor = provider.current()
+      } catch (error) {
+        console.error('[dsh-better-sidebar] save actor provider failed:', error)
+        actor = undefined
+      }
+      if (actor !== undefined) actors.push(actor)
+    }
+    if (saveListeners.size === 0) return
+    const event: FileSavedEvent = { path, sessionId, actors, length }
+    for (const listener of saveListeners.values()) {
+      safeCall(() => { listener.onSaved(event) })
+    }
+  }
+
+  const registerSaveActor = (provider: SaveActorProvider): (() => void) => {
+    saveActors.set(provider.id, provider)
+    return () => { saveActors.delete(provider.id) }
+  }
+
+  const registerSaveListener = (listener: SaveListener): (() => void) => {
+    saveListeners.set(listener.id, listener)
+    return () => { saveListeners.delete(listener.id) }
+  }
 
   const notify = (): void => {
     for (const fn of [...listeners]) fn()
@@ -1453,6 +1607,9 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
     registerTab,
     registerFileViewer,
     registerFileIcon,
+    registerSaveActor,
+    registerSaveListener,
+    emitFileSaved,
     getTabs,
     getFileViewers,
     getFileIcons,

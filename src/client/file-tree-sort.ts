@@ -15,8 +15,14 @@
  * never be reordered in place.
  */
 
-/** The two orderings the control offers ("by modified time" is a separate issue). */
-export type FileTreeSortKey = 'name' | 'type'
+/**
+ * The orderings the control offers.
+ *
+ * `mtime` is the default because a workspace is worked in: the thing touched last is the
+ * thing a reader is usually looking for, and the host's own name order buries it. `name`
+ * keeps that host order, `type` groups by extension, `size` surfaces the large files.
+ */
+export type FileTreeSortKey = 'mtime' | 'name' | 'type' | 'size'
 
 /** One explorer sort choice: the key plus the folders-first switch. */
 export interface FileTreeSort {
@@ -25,8 +31,13 @@ export interface FileTreeSort {
   dirsFirst: boolean
 }
 
-/** The default choice — byte-for-byte the order the host listing arrives in. */
-export const DEFAULT_FILE_TREE_SORT: FileTreeSort = { key: 'name', dirsFirst: true }
+/**
+ * The default choice: most recently modified first.
+ *
+ * NOT the order the host listing arrives in (that is `name`). The change is deliberate:
+ * a reader opening a folder is usually looking for what they were just working on.
+ */
+export const DEFAULT_FILE_TREE_SORT: FileTreeSort = { key: 'mtime', dirsFirst: true }
 
 /**
  * The extension shown as a row's "type": the text after the LAST dot,
@@ -61,13 +72,31 @@ function compareName(a: { name: string }, b: { name: string }): number {
  * @param sort - the caller's choice (key + folders-first switch).
  * @returns a new array; the rows themselves are the same objects.
  */
-export function sortEntries<T extends { name: string; isDir: boolean }>(
+export function sortEntries<T extends { name: string; isDir: boolean; mtimeMs?: number; size?: number }>(
   entries: readonly T[],
   sort: FileTreeSort,
 ): T[] {
   return [...entries].sort((a, b) => {
     if (sort.dirsFirst && a.isDir !== b.isDir) return a.isDir ? -1 : 1
-    if (sort.key === 'type') {
+    // The key decides the order; `compareName` is always the tie-break so the result stays
+    // total and stable (two rows can share a mtime, a size, or a type).
+    if (sort.key === 'mtime') {
+      const ma = a.mtimeMs
+      const mb = b.mtimeMs
+      // Newest first. An unknown time sorts LAST rather than as epoch-zero, which would
+      // bury rows that do have a time under ones that do not.
+      if (ma !== undefined && mb !== undefined && ma !== mb) return mb - ma
+      if (ma === undefined && mb !== undefined) return 1
+      if (ma !== undefined && mb === undefined) return -1
+    } else if (sort.key === 'size') {
+      const sa = a.size
+      const sb = b.size
+      // Largest first, and a missing size (a directory, a failed probe) is last -- never
+      // treated as zero, which would sort every folder among the empty files.
+      if (sa !== undefined && sb !== undefined && sa !== sb) return sb - sa
+      if (sa === undefined && sb !== undefined) return 1
+      if (sa !== undefined && sb === undefined) return -1
+    } else if (sort.key === 'type') {
       const ta = typeOf(a.name, a.isDir)
       const tb = typeOf(b.name, b.isDir)
       if (ta !== tb) return ta < tb ? -1 : 1

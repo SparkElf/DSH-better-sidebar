@@ -192,6 +192,7 @@ export const ru: Record<string, string> = {
   searchGo: 'Перейти',
   binary: 'Бинарный файл — предпросмотр недоступен',
   loading: 'Загрузка…',
+  filterNoMatch: 'Нет подходящих файлов',
   error: 'Ошибка загрузки',
   retry: 'Повторить',
   notRepo: 'Этот каталог не является git-репозиторием',

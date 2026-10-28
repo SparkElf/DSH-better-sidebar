@@ -56,6 +56,7 @@ import { VscFolderOpened, VscLinkExternal, VscPin, VscPinned } from 'react-icons
 import { api, archiveBuild, archiveDownloadUrl, archiveStatus, downloadUrl, SidebarApiError, type FsEntry, type FsLevel } from './api.ts'
 import { compactChain, compactLoadTargets } from './file-tree-compact.ts'
 import { DEFAULT_FILE_TREE_SORT, sortEntries, type FileTreeSort } from './file-tree-sort.ts'
+import { filterLevel, normaliseNeedle, type FilterableEntry } from './listing-filter.ts'
 import { FS_TREES_MAX_PATHS } from '../fs-batch.ts'
 import { builtinFileIcon, builtinFolderIcon } from './file-icons.tsx'
 import { IconUploadOutline16, IconVscode16 } from './icons.tsx'
@@ -229,6 +230,37 @@ function AppGlyph(props: { entry: OpenInAppEntry }): ReactNode {
   return <img className={css.explorerAppIcon} src={icon} alt="" width={14} height={14} />
 }
 
+/**
+ * Compact last-modified label for one explorer row.
+ *
+ * A same-day file shows a time and an older one a date: the row is 28px tall and
+ * the label shares its line with a name that already ellipsizes, so it stays
+ * short. The tooltip carries the full stamp.
+ * @param mtimeMs - last-modified time in milliseconds.
+ * @returns the label, or an empty string for an unreadable timestamp.
+ */
+function formatModified(mtimeMs: number): string {
+  const date = new Date(mtimeMs)
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  const sameDay = date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+  return sameDay
+    ? `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+    : `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * Full last-modified time for the row's tooltip.
+ * @param mtimeMs - last-modified time in milliseconds.
+ * @returns the locale string, or an empty string for an unreadable timestamp.
+ */
+function formatModifiedTitle(mtimeMs: number): string {
+  const date = new Date(mtimeMs)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString()
+}
+
 /** One file row's props. Everything is a primitive or a stable reference so
  *  memo() actually bails out. */
 interface FileRowProps {
@@ -293,6 +325,11 @@ const FileRow = memo(function FileRow(props: FileRowProps): ReactNode {
       {gitTone !== undefined && gitLetter !== undefined && (
         <StatusBadge tone={badgeToneOf(gitTone)} title={gitToneLabel(gitTone)}>{gitLetter}</StatusBadge>
       )}
+      {entry.mtimeMs !== undefined && (
+        <span className={css.explorerTime} title={formatModifiedTitle(entry.mtimeMs)}>
+          {formatModified(entry.mtimeMs)}
+        </span>
+      )}
       {copied
         ? <span className={css.explorerCopied}>{t('copied')}</span>
         : (
@@ -334,10 +371,12 @@ interface DirRowProps {
   gitChanged: boolean
   copied: boolean
   actions: RowActions
+  /** Override the printed row name; absent prints the entry's own name. */
+  dirLabel?: (path: string, entry: FsEntry) => string
 }
 
 const DirRow = memo(function DirRow(props: DirRowProps): ReactNode {
-  const { entry, chain, depth, expanded, iconsVersion, service, selected, revealed, dropTarget, gitChanged, copied, actions } = props
+  const { entry, chain, depth, expanded, iconsVersion, service, selected, revealed, dropTarget, gitChanged, copied, actions, dirLabel } = props
   void iconsVersion
   // The row's ACTIONS target the chain's deepest link: that is the directory
   // the user sees expanded (`a/b/c`), so dropping into it, renaming it or
@@ -378,9 +417,16 @@ const DirRow = memo(function DirRow(props: DirRowProps): ReactNode {
     >
       {icon}
       <span className={clsx(css.explorerName, gitChanged && css.explorerDirChanged)}>
-        {chain.length > 1 ? chain.map(link => link.name).join('/') : entry.name}
+        {chain.length > 1
+          ? chain.map(link => dirLabel === undefined ? link.name : dirLabel(link.path, link)).join('/')
+          : (dirLabel === undefined ? entry.name : dirLabel(entry.path, entry))}
       </span>
       {entry.isSymlink && <IconLinkOutlineRegular size={12} className={css.explorerSymlink} />}
+      {entry.mtimeMs !== undefined && (
+        <span className={css.explorerTime} title={formatModifiedTitle(entry.mtimeMs)}>
+          {formatModified(entry.mtimeMs)}
+        </span>
+      )}
       {copied
         ? <span className={css.explorerCopied}>{t('copied')}</span>
         : (
@@ -490,9 +536,84 @@ function sameScope(armed: FsScope | undefined, live: FsScope | undefined): boole
     && armed.sessionId === live.sessionId && armed.cwd === live.cwd
 }
 
+/**
+ * One row a caller appends to the file tree's context menu.
+ *
+ * The menu is the tree's own: its rows, its container, its hover and keyboard
+ * behaviour. A caller with a row to add therefore hands over DATA rather than a
+ * second menu, so the appended row is indistinguishable from a native one and
+ * the native rows keep their order, wording and handlers untouched.
+ *
+ * The row is a menu item, not a submenu parent: `onSelect` runs when the row is
+ * chosen, and the menu closes the way it does for any other row.
+ */
+export interface FileTreeMenuItem {
+  /** Row identity. Must not collide with a native id, or selecting it would run the native action. */
+  id: string
+  /** Visible label, already localized by the caller. */
+  label: string
+  /**
+   * Leading 14px glyph, the same slot the native rows use.
+   *
+   * Optional so a caller following the minimal contract needs nothing, but the
+   * menu lays its rows out with `display:flex` and a gap: a row WITHOUT an icon
+   * starts 20px left of every native row above it, which reads as a different
+   * list. Pass one, or accept that offset deliberately.
+   */
+  icon?: ReactNode
+  /**
+   * Run the caller's action for the row that was right-clicked.
+   *
+   * `relPath` is relative to the tree's `cwd` — the same spelling the
+   * "copy relative path" row produces — and is the path as given when `cwd` is
+   * absent or the row lies outside it.
+   */
+  onSelect: (target: { relPath: string; isDir: boolean }) => void
+  /**
+   * Whether this row applies to the right-clicked entry. Returning false (or
+   * omitting the row for a directory, etc.) draws nothing at all — not a
+   * disabled row, which would advertise an action that cannot run.
+   */
+  when?: (target: { relPath: string; isDir: boolean }) => boolean
+}
+
 export function FileTree(props: {
   sessionId: string
   cwd: string | undefined
+  /**
+   * Render the levels under `cwd` WITHOUT the row for `cwd` itself.
+   *
+   * The root row is right for the workbench, where `cwd` is a workspace the reader
+   * navigates from. A surface already scoped to one directory (the knowledge base)
+   * shows that directory's contents as its tree, so a row repeating the directory's
+   * own name is a level of nesting the reader never asked for. Expansion, loading
+   * and every action are unaffected -- only that one row goes.
+   */
+  hideRoot?: boolean
+  /**
+   * Offer the multi-row selection bar (copy paths / delete / clear).
+   *
+   * The workbench wants it. A read-mostly surface that opens one document at a time
+   * does not: the bar answers Ctrl/Shift-click gestures its readers never make, and
+   * it costs a row of height whenever a stray click lands on the body. Defaults on.
+   */
+  selectionBar?: boolean
+  /**
+   * Render one directory's row name for a different audience than the disk name.
+   *
+   * The rows print `entry.name` because that is what the path IS, and for a
+   * workbench tree that is also what the reader wants to see. A surface whose
+   * top-level folders are a vocabulary of its own -- the knowledge base's three
+   * buckets name WHO may read the folder, while the folders themselves are called
+   * `global` / `department` / `personal` on disk -- needs to say the audience
+   * without renaming anything: the directory name is also a path segment the
+   * deployment shares, so it cannot be edited to suit one caller's language.
+   *
+   * Absent means "print the entry name", so every existing caller is unaffected.
+   * The callback receives the absolute path (stable, and what a caller keys on)
+   * and the entry, so it can decide per row rather than per level.
+   */
+  dirLabel?: (path: string, entry: FsEntry) => string
   expanded: string[]
   /** Files highlighted by a "Show in folder" reveal (absolute paths). */
   revealed: string[]
@@ -502,6 +623,17 @@ export function FileTree(props: {
   onOpenFileNewTab?: (path: string) => void
   /** Context-menu "open to the side" (file rows; absent → no entry). */
   onOpenFileSide?: (path: string) => void
+  /**
+   * Rows appended to the end of the context menu, after the native ones.
+   *
+   * Absent means "no rows", which is why every existing caller renders exactly
+   * what it rendered before: the array is empty and no separator is drawn.
+   * When it has an applicable row, a separator precedes the group so the
+   * caller's actions read as a group of their own rather than as a native
+   * continuation — and that separator is omitted when `when` filters every row
+   * out, so a caller never leaves a trailing hairline.
+   */
+  extraMenuItems?: readonly FileTreeMenuItem[]
   /**
    * The host's open-in-app handle (EditorHost builds it and injects it).
    * Absent, or reporting the host cannot hand paths to the desktop, hides the
@@ -530,6 +662,21 @@ export function FileTree(props: {
    *  them (excluded rows never arrive), so changing the list wipes the level
    *  cache and reloads — the rows themselves need no client-side filter. */
   exclude?: readonly string[]
+  /**
+   * Narrow the visible rows to names containing this text.
+   *
+   * Applied to the levels ALREADY LOADED: nothing is re-requested, so typing in the field
+   * costs no round trip. Matching is `listing-filter.ts`'s rule set, shared with the
+   * knowledge listing so both surfaces narrow identically.
+   *
+   * A directory is kept when it matches, when anything below it matches, or when an
+   * ancestor matched -- a hit inside a collapsed folder would otherwise be invisible. The
+   * rows that survive therefore form the same tree, only thinner; expansion state is left
+   * untouched, so clearing the term restores exactly what was on screen.
+   *
+   * Absent or blank means "no filtering", which is the behaviour every other caller gets.
+   */
+  nameFilter?: string
   /** A rename landed (old row path → new path): the caller retargets open tabs. */
   onPathRenamed?: (oldPath: string, newPath: string) => void
   /** A delete landed: the caller closes tabs at or under the removed path. */
@@ -580,7 +727,7 @@ export function FileTree(props: {
   const {
     sessionId, cwd, expanded, revealed, onOpenFileNewTab, onOpenFileSide,
     openInApp, openWithTargets, openWithPinned, openWithSsh, onOpenWith, onToggleOpenWithPin,
-    openWithShowPluginTargets, exclude,
+    openWithShowPluginTargets, exclude, nameFilter,
     onPathRenamed, onPathDeleted, refreshTick, onUploadRequest, busy, hidden, visible, service,
   } = props
   const sort = props.sort ?? DEFAULT_FILE_TREE_SORT
@@ -609,6 +756,19 @@ export function FileTree(props: {
   const dataRef = useRef(data)
   /** Bumped whenever the cache is wiped: a response from an older generation is dropped. */
   const generationRef = useRef(0)
+/**
+ * The context menu's native row ids.
+ *
+ * A caller's appended row is matched against these before its own `onSelect`
+ * runs, so an id in this set has to be refused: letting it through would make
+ * a caller's row answer the native id and take a shipped action away.
+ */
+const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
+  'open-new-tab', 'open-side', 'download', 'upload-here', 'new-folder', 'new-file',
+  'archive-selection', 'relative', 'absolute', 'rename', 'delete',
+  'reveal-in-file-manager',
+])
+
   /** The row whose path was just copied ("copied" label replaces its button). */
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   /** Open context menu: the row path (and whether it is a directory) plus the cursor position. */
@@ -1725,6 +1885,38 @@ export function FileTree(props: {
     return []
   }
 
+  /**
+   * The caller's appended rows, as menu entries.
+   *
+   * `relPath` is resolved here rather than in the caller: the tree is the only
+   * party that knows `cwd`, and the spelling has to match the "copy relative
+   * path" row the user already reads in this same menu. An entry outside the
+   * tree (or a tree with no `cwd`) passes through `relativeTo` unchanged,
+   * which is also what that native row does.
+   *
+   * The group's separator is prepended only when at least one row survives
+   * `when`, so a caller whose rows do not apply to this entry leaves the menu
+   * exactly as it was — no stray hairline at the bottom.
+   */
+  const extraRows: MenuEntry[] = (() => {
+    const target = rowMenu
+    const items = props.extraMenuItems
+    if (target === null || items === undefined || items.length === 0) return []
+    // A caller id equal to a native one would SHADOW that native action on
+    // select, which is exactly the "the original feature is gone" failure this
+    // prop exists to avoid. Refuse the whole group instead of silently
+    // winning: the caller sees nothing appended, which points at their mistake,
+    // rather than a native row that stopped working.
+    if (items.some(item => NATIVE_MENU_IDS.has(item.id))) return []
+    const relPath = relativeTo(cwd ?? '', target.path)
+    const hit = { relPath, isDir: target.isDir }
+    const rows = items
+      .filter(item => item.when === undefined || item.when(hit))
+      .map(item => ({ id: item.id, label: item.label, ...(item.icon === undefined ? {} : { icon: item.icon }) }))
+    if (rows.length === 0) return []
+    return [{ id: 'extra-items-sep', type: 'separator' } as MenuEntry, ...rows]
+  })()
+
   /** Download a file through the host route (raw bytes, binary-safe). */
   const downloadFile = (path: string): void => {
     const url = downloadUrl({ sessionId, cwd }, path)
@@ -1917,16 +2109,40 @@ export function FileTree(props: {
    * `sortEntries` copies (the level cache keeps the host's own order and is
    * never reordered in place).
    */
+  /** The caller's filter, normalised once per change. */
+  const needle = normaliseNeedle(nameFilter ?? '')
+
   const entriesFor = useMemo(() => {
     const cache = new Map<string, readonly FsEntry[]>()
+    /**
+     * Every loaded level as a `children` map for the filter.
+     *
+     * Built from the level cache rather than from what is on screen: the filter has to see
+     * the children of a COLLAPSED folder to know whether it should stay visible. Unloaded
+     * levels are simply absent, which the rule set treats as "judge this row by its own
+     * name" -- the same answer the reader would get after expanding it.
+     */
+    /** The loaded children of one directory row, for the filter's descent. */
+    const childrenOf = (entry: FsEntry): readonly FsEntry[] | undefined => {
+      if (!entry.isDir) return undefined
+      const level = data[entry.path]
+      // `undefined` (not yet read) is different from `[]` (read, empty): only the former
+      // means "cannot be searched", so the distinction is preserved here.
+      return level?.entries === undefined ? undefined : sortEntries(level.entries, sort)
+    }
+    const filteredFor = (dir: string): readonly FsEntry[] => {
+      const rows = sortEntries(data[dir]?.entries ?? [], sort)
+      if (needle === '') return rows
+      return filterLevel(rows, childrenOf, needle)
+    }
     return (dir: string): readonly FsEntry[] => {
       const cached = cache.get(dir)
       if (cached !== undefined) return cached
-      const sorted = sortEntries(data[dir]?.entries ?? [], sort)
-      cache.set(dir, sorted)
-      return sorted
+      const rows = filteredFor(dir)
+      cache.set(dir, rows)
+      return rows
     }
-  }, [data, sort])
+  }, [data, sort, nameFilter])
 
   // The Shift range walks the rows the user can actually see: the level's
   // rows in the SAME order `renderLevel` draws them (the sort choice), then
@@ -2118,9 +2334,19 @@ export function FileTree(props: {
     }
     // The ORDER is the caller's choice (the header's sort control).
     const entries = entriesFor(dir)
+    // A filter that matched nothing must SAY so. Without this the body is simply empty,
+    // which is indistinguishable from a tree that failed to load -- the reader cannot tell
+    // "no document has this name" from "the tree is broken".
+    const emptyFromFilter = needle !== '' && entries.length === 0 && level.entries !== undefined
+      && level.entries.length > 0
     return (
       <>
         {head}
+        {emptyFromFilter && (
+          <div className={clsx(css.explorerRow, css.explorerMuted)} style={{ paddingLeft: depth * 22 + 6 }}>
+            {t('filterNoMatch')}
+          </div>
+        )}
         {entries.map((entry) => {
           // Fold chains (VSCode "compact folders"): a chain of dirs holding
           // exactly one real dir child each renders as ONE `a/b/c` row; the
@@ -2155,6 +2381,7 @@ export function FileTree(props: {
                   gitChanged={gitStatus.dirHasChanges(entry.path)}
                   copied={copiedPath === entry.path}
                   actions={actions}
+                  dirLabel={propsRef.current.dirLabel}
                 />
                 {isOpen && renderLevel(tail.path, depth + 1)}
               </div>
@@ -2233,20 +2460,22 @@ export function FileTree(props: {
           {archiveBusy && (
             <Notice kind="loading" tone="inline" role="status">{t('loading')}</Notice>
           )}
-          <RootRow
-            path={root}
-            iconsVersion={iconsVersion}
-            service={service}
-            dropTarget={dropTarget === root}
-            gitChanged={gitStatus.dirHasChanges(root)}
-            copied={copiedPath === root}
-            actions={actions}
-          />
-          {renderLevel(root, 1)}
+          {propsRef.current.hideRoot === true ? null : (
+            <RootRow
+              path={root}
+              iconsVersion={iconsVersion}
+              service={service}
+              dropTarget={dropTarget === root}
+              gitChanged={gitStatus.dirHasChanges(root)}
+              copied={copiedPath === root}
+              actions={actions}
+            />
+          )}
+          {renderLevel(root, propsRef.current.hideRoot === true ? 0 : 1)}
           {/* The selection bar closes the scroll container (sticky bottom): it
               sits BELOW every row, never over them, and its appearance never
               shifts the tree the way a top bar did. */}
-          {selected.size > 0 && (
+          {selected.size > 0 && propsRef.current.selectionBar !== false && (
             <div className={css.explorerSelectionBar} role="toolbar" aria-label={t('filesSelected', { count: selected.size })}>
               <span className={css.explorerSelectionText}>{t('filesSelected', { count: selected.size })}</span>
               <span className={css.explorerSelectionActions}>
@@ -2367,6 +2596,11 @@ export function FileTree(props: {
                 { id: 'delete', label: t('delete'), icon: <IconTrashOutlineRegular size={14} />, danger: true },
               ]
             : []),
+          // The caller's own rows, LAST: the native list keeps the order it has
+          // always had, and anything appended is visibly a group of its own. The
+          // separator belongs to that group, so it is only drawn when a row
+          // survives `when` — a filtered-out group leaves no trailing hairline.
+          ...extraRows,
         ]}
         onSelect={(id) => {
           const target = rowMenu
@@ -2435,6 +2669,15 @@ export function FileTree(props: {
             const armed = scopeOf(propsRef.current)
             if (armed === undefined) return
             setConfirmDelete({ path: target.path, isDir: target.isDir, name: baseName(target.path), scope: armed })
+            return
+          }
+          // The caller's rows: matched against the array the menu was built
+          // from, so a caller that swaps its rows between open and select still
+          // gets the row it named. Anything unmatched falls through to the
+          // native copy rows below, exactly as before.
+          const extra = propsRef.current.extraMenuItems?.find(item => item.id === id)
+          if (extra !== undefined) {
+            extra.onSelect({ relPath: relativeTo(cwd ?? '', target.path), isDir: target.isDir })
             return
           }
           copyPath(

@@ -179,6 +179,7 @@ export const sv: Record<string, string> = {
   searchGo: 'Gå',
   binary: 'Binärfil, förhandsgranskning otillgänglig',
   loading: 'Laddar…',
+  filterNoMatch: 'Inga matchande filer',
   error: 'Kunde inte ladda',
   retry: 'Försök igen',
   notRepo: 'Denna katalog är inte ett Git-arkiv',

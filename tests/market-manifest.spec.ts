@@ -61,7 +61,11 @@ function packedManifest(): Record<string, unknown> {
     // Never hand tar an absolute Windows path: Git Bash's GNU tar reads the
     // drive-letter colon as a remote-host spec ("Cannot connect to C:").
     // Run it from the pack dir with the bare tarball name instead.
-    execFileSync('tar', ['-xzf', `${pkg.name}-${pkg.version}.tgz`, 'package/package.json'], { cwd: dir, stdio: 'pipe' })
+    // npm derives the tarball name from the package name by dropping the scope's
+    // `@` and replacing the `/` with `-`, so a scoped package packs to
+    // `sparkelf-dsh-better-sidebar-<version>.tgz`. Spelling `${name}-${version}`
+    // worked only while the package was unscoped.
+    execFileSync('tar', ['-xzf', `${pkg.name.replace(/^@/, '').replace('/', '-')}-${pkg.version}.tgz`, 'package/package.json'], { cwd: dir, stdio: 'pipe' })
     return JSON.parse(readFileSync(join(dir, 'package/package.json'), 'utf8')) as Record<string, unknown>
   } finally {
     removeTree(dir)

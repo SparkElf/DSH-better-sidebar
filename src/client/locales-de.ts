@@ -182,6 +182,7 @@ export const de: Record<string, string> = {
   searchGo: 'Los',
   binary: 'Binärdatei, Vorschau nicht verfügbar',
   loading: 'Wird geladen…',
+  filterNoMatch: 'Keine passenden Dateien',
   error: 'Laden fehlgeschlagen',
   retry: 'Erneut versuchen',
   notRepo: 'Dieses Verzeichnis ist kein Git-Repository',

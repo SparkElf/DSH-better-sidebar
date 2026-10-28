@@ -211,6 +211,7 @@ export const zhTW: Record<string, string> = {
   searchGo: '跳至',
   binary: '二進位檔案，無法預覽',
   loading: '載入中…',
+  filterNoMatch: '沒有符合的檔案',
   error: '載入失敗',
   retry: '重試',
   notRepo: '目前目錄不是 git 倉庫',

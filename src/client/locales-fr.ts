@@ -189,6 +189,7 @@ export const fr: Record<string, string> = {
   searchGo: 'Aller',
   binary: 'Fichier binaire, aperçu impossible',
   loading: 'Chargement…',
+  filterNoMatch: 'Aucun fichier correspondant',
   error: 'Échec du chargement',
   retry: 'Réessayer',
   notRepo: 'Ce répertoire n’est pas un dépôt git',

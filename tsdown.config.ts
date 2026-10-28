@@ -46,6 +46,28 @@ import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
+const ROOT = dirname(fileURLToPath(import.meta.url))
+const MANIFEST: { name: string; dsh?: { installName?: string } } = JSON.parse(
+  await readFile(join(ROOT, 'package.json'), 'utf8'),
+)
+
+/**
+ * The id the OFFICIAL client bundle registers under.
+ *
+ * Not `package.json#name`: the compose contract keys on the name the profile
+ * INSTALLED the package as, and those differ whenever a consumer installs this
+ * package under an alias -- the deployment writes
+ * `"dsh-better-sidebar": "npm:@sparkelf/dsh-better-sidebar@…"`, so the directory,
+ * the bundle-stack entry and the id the loader expects are all the unscoped name
+ * while the published package carries the scope. Registering the scoped name made
+ * the loader report "loaded without registering" and every consumer that waits on
+ * the betterSidebar service stayed pending.
+ *
+ * `dsh.installName` carries that distinction; a plain package (no alias) falls
+ * back to its own name, which is the same value the alias resolves to.
+ */
+const INSTALL_NAME: string = MANIFEST.dsh?.installName ?? MANIFEST.name
+
 const require = createRequire(import.meta.url)
 
 /** Node builtins must never survive into the browser module-loader factory. */
@@ -340,7 +362,7 @@ export default [
     clean: false,
   },
   // Official profile channel: bundle id = package name (package.json `name`).
-  clientBundle('dsh-better-sidebar', 'client.js'),
+  clientBundle(INSTALL_NAME, 'client.js'),
   // Third-party registry channel: bundle id = the market manifest's id
   // (dsh.plugin.json). DSH never reads that file — the official profile
   // channel is the package-name bundle above, declared through

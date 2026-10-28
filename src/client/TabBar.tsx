@@ -330,11 +330,18 @@ export function TabBar(props: {
           open={tabMenu !== null && tabMenuIndex >= 0}
           onClose={() => { setTabMenu(null) }}
           items={[
-            { id: 'close', label: t('close') },
+            // The batch operations come FIRST, above the single-tab close: they act on the
+            // whole strip rather than on the row that was right-clicked, and a reader who
+            // meant to close one tab must not find "close all" where their thumb already
+            // is. The separator is what says the two groups are different kinds of act.
             { id: 'closeOthers', label: t('closeOtherTabs'), ...(tabs.length <= 1 ? { disabled: true } : {}) },
             { id: 'closeLeft', label: t('closeLeftTabs'), ...(tabMenuIndex <= 0 ? { disabled: true } : {}) },
             { id: 'closeRight', label: t('closeRightTabs'), ...(tabMenuIndex >= tabs.length - 1 ? { disabled: true } : {}) },
             { id: 'closeAll', label: t('closeAllTabs') },
+            // A DATA separator: `separatorBefore` belongs to the component-rendered row,
+            // not to a `{ id, label }` entry.
+            { type: 'separator', id: 'closeSeparator' },
+            { id: 'close', label: t('close') },
             { id: 'revealInFileManager', label: t('revealTabInFileManager'), ...(canReveal ? {} : { disabled: true }) },
           ]}
           onSelect={(id) => {

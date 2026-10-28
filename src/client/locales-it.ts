@@ -187,6 +187,7 @@ export const it: Record<string, string> = {
   searchGo: 'Vai',
   binary: 'File binario, anteprima non disponibile',
   loading: 'Caricamento…',
+  filterNoMatch: 'Nessun file corrispondente',
   error: 'Caricamento non riuscito',
   retry: 'Riprova',
   notRepo: 'Questa directory non è un repository git',

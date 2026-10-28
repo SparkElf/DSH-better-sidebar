@@ -47,9 +47,14 @@ describe('HTML preview iframe sandbox', () => {
     expect(iframe).toBeDefined()
     // The sandbox tokens are exactly the exported constant...
     expect(iframe).toContain(`sandbox="${HTML_IFRAME_SANDBOX}"`)
-    // ...which must never contain the dangerous tokens.
-    expect(HTML_IFRAME_SANDBOX).not.toContain('allow-same-origin')
+    // ...which must never contain the tokens that let a previewed page HIJACK the GUI.
     expect(HTML_IFRAME_SANDBOX).not.toContain('allow-top-navigation')
+    // `allow-same-origin` IS present, deliberately. Without it the frame is an opaque origin,
+    // its requests carry `Origin: null`, and the sidebar's own fence refuses them: the preview
+    // answered 200 and still rendered as an empty box. The isolation that remains is the
+    // sandbox itself plus the route's own CSP. This is a weaken-the-isolation decision, so it
+    // is asserted rather than left implicit -- see html-preview.ts for the reasoning.
+    expect(HTML_IFRAME_SANDBOX).toContain('allow-same-origin')
     // Cross-origin framing by construction: route-src (never srcdoc).
     expect(iframe).toContain('src="http://localhost/sidebar/html/s1/p/a/index.html"')
     expect(iframe).not.toContain('srcdoc=')
@@ -134,7 +139,9 @@ describe('changes tab HTML render preview sandbox', () => {
     // The sandbox tokens are exactly the shared constant — and unlike the
     // editor viewer this surface has NO no-sandbox escape hatch.
     expect(iframe).toContain(`sandbox="${HTML_IFRAME_SANDBOX}"`)
-    expect(HTML_IFRAME_SANDBOX).not.toContain('allow-same-origin')
+    // Same deliberate token set as the viewer (see html-preview.ts): the sandbox attribute must
+    // exist on this surface too, and the only withheld token is top-navigation.
+    expect(HTML_IFRAME_SANDBOX).not.toContain('allow-top-navigation')
     expect(HTML_IFRAME_SANDBOX).not.toContain('allow-top-navigation')
     // Cross-origin framing by construction: route-src (never srcdoc). The src
     // here is the caller's literal (DiffPane passes htmlUrl(...)); this surface

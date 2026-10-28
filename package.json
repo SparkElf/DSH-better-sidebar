@@ -1,11 +1,11 @@
 {
-  "name": "dsh-better-sidebar",
-  "version": "0.29.0",
+  "name": "@sparkelf/dsh-better-sidebar",
+  "version": "0.29.0-sparkelf.1",
   "description": "Better Sidebar for DSH — file tree, editor, changes, tasks and side chat in one column, separate for every conversation. Also exposes a service other plugins use to register sidebar tabs and file viewers.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/omdsh-dev/DSH-better-sidebar"
+    "url": "https://github.com/SparkElf/DSH-better-sidebar.git"
   },
   "publishConfig": {
     "access": "public"
@@ -39,6 +39,7 @@
   },
   "packageManager": "pnpm@11.8.0",
   "dsh": {
+    "installName": "dsh-better-sidebar",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -227,5 +228,6 @@
     "vitest": "^4.1.8",
     "zustand": "~4.4.7"
   },
-  "icon": "./icon.svg"
+  "icon": "./icon.svg",
+  "homepage": "https://github.com/SparkElf/DSH-better-sidebar#readme"
 }

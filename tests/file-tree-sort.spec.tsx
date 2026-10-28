@@ -28,8 +28,8 @@ beforeAll(() => {
 })
 
 /** One host-shaped row (only the fields ordering reads). */
-function row(name: string, isDir: boolean): SidebarFsEntry {
-  return { name, path: `/tmp/${name}`, isDir, hidden: false, isSymlink: false, broken: false }
+function row(name: string, isDir: boolean, extra: { mtimeMs?: number; size?: number } = {}): SidebarFsEntry {
+  return { name, path: `/tmp/${name}`, isDir, hidden: false, isSymlink: false, broken: false, ...extra }
 }
 
 /**
@@ -47,19 +47,62 @@ const HOST_ORDER: SidebarFsEntry[] = [
 const names = (entries: readonly { name: string }[]): string[] => entries.map(entry => entry.name)
 
 describe('file tree sort (pure ordering)', () => {
-  it('defaults to the server order: same key, folders first', () => {
-    expect(DEFAULT_FILE_TREE_SORT).toEqual({ key: 'name', dirsFirst: true })
+  it('defaults to most recently modified first, folders first', () => {
+    // The default is deliberately NOT the host's name order: a reader opening a folder is
+    // usually looking for what they were just working on.
+    expect(DEFAULT_FILE_TREE_SORT).toEqual({ key: 'mtime', dirsFirst: true })
   })
 
-  it('reproduces compareEntries EXACTLY for the default choice', () => {
-    // The host comparator is the reference: the default client order must be
-    // the same listing order, element for element (the control ON with its
-    // initial value changes nothing).
-    expect(names(sortEntries(HOST_ORDER, DEFAULT_FILE_TREE_SORT)))
+  it('reproduces compareEntries EXACTLY for the name choice', () => {
+    // The host comparator is the reference for `name`: that choice must be the same
+    // listing order, element for element.
+    expect(names(sortEntries(HOST_ORDER, { key: 'name', dirsFirst: true })))
       .toEqual(names([...HOST_ORDER].sort(compareEntries)))
-    // …and it is not a no-op by accident: an unsorted level comes out ordered.
     const shuffled = [HOST_ORDER[2]!, HOST_ORDER[0]!, HOST_ORDER[3]!, HOST_ORDER[1]!]
-    expect(names(sortEntries(shuffled, DEFAULT_FILE_TREE_SORT))).toEqual(['zdir', 'alpha.ts', 'beta', 'Gamma.MD'])
+    expect(names(sortEntries(shuffled, { key: 'name', dirsFirst: true }))).toEqual(['zdir', 'alpha.ts', 'beta', 'Gamma.MD'])
+  })
+
+  it('orders by modified time, newest first, folders still first', () => {
+    // 三个文件的时间刻意打乱，确认按时间而不是按名字。
+    const entries = [
+      row('old.txt', false, { mtimeMs: 1_000 }),
+      row('new.txt', false, { mtimeMs: 9_000 }),
+      row('mid.txt', false, { mtimeMs: 5_000 }),
+      row('Dir', true, { mtimeMs: 100 }),
+    ]
+    expect(names(sortEntries(entries, { key: 'mtime', dirsFirst: true })))
+      .toEqual(['Dir', 'new.txt', 'mid.txt', 'old.txt'])
+  })
+
+  it('puts a row with no modified time last, not at epoch zero', () => {
+    // 探测失败的行没有时间；当成 0 会把它排到最旧，从而埋在能读的行下面。
+    const entries = [
+      row('unknown.txt', false, {}),
+      row('known.txt', false, { mtimeMs: 5_000 }),
+    ]
+    expect(names(sortEntries(entries, { key: 'mtime', dirsFirst: true })))
+      .toEqual(['known.txt', 'unknown.txt'])
+  })
+
+  it('orders by size, largest first, and treats a missing size as unknown', () => {
+    const entries = [
+      row('small.txt', false, { size: 10 }),
+      row('big.txt', false, { size: 900 }),
+      row('Dir', true, {}),                    // a directory has no meaningful size
+      row('mid.txt', false, { size: 200 }),
+    ]
+    expect(names(sortEntries(entries, { key: 'size', dirsFirst: true })))
+      .toEqual(['Dir', 'big.txt', 'mid.txt', 'small.txt'])
+  })
+
+  it('is a total order whatever the key: ties fall back to the name', () => {
+    // 两个文件可以同一时间、同一大小；没有名字兜底，顺序会随实现漂移。
+    const entries = [
+      row('b.txt', false, { mtimeMs: 5_000, size: 10 }),
+      row('a.txt', false, { mtimeMs: 5_000, size: 10 }),
+    ]
+    expect(names(sortEntries(entries, { key: 'mtime', dirsFirst: true }))).toEqual(['a.txt', 'b.txt'])
+    expect(names(sortEntries(entries, { key: 'size', dirsFirst: true }))).toEqual(['a.txt', 'b.txt'])
   })
 
   it('orders by name case-insensitively with the host tie-break when folders are first', () => {
@@ -133,7 +176,13 @@ interface Harness {
 function rowNames(container: HTMLElement): string[] {
   return [...container.querySelectorAll<HTMLElement>('[class*="explorerRow"]')]
     .filter(el => (el.style.paddingLeft === '28px'))
-    .map(el => el.querySelector('[class*="explorerName"]')?.textContent ?? '')
+    // A row with no `explorerName` is not a FILE row: the filter's "nothing matched"
+    // sentence is drawn with the same row class and indent, so it must not be counted as
+    // an entry -- dropping it here keeps this helper meaning "the names on screen".
+    .flatMap((el): string[] => {
+      const name = el.querySelector('[class*="explorerName"]')?.textContent
+      return name === null || name === undefined ? [] : [name]
+    })
 }
 
 let harness: Harness | undefined
@@ -148,7 +197,7 @@ afterEach(() => {
 })
 
 describe('FileTree sort prop', () => {
-  function mountTree(sort?: { key: 'name' | 'type'; dirsFirst: boolean }): Harness {
+  function mountTree(sort?: { key: 'mtime' | 'name' | 'type' | 'size'; dirsFirst: boolean }, nameFilter?: string): Harness {
     const container = document.createElement('div')
     document.body.append(container)
     const root: Root = createRoot(container)
@@ -165,6 +214,7 @@ describe('FileTree sort prop', () => {
         onUploadRequest: () => {},
         busy: false,
         ...(sort !== undefined ? { sort } : {}),
+        ...(nameFilter !== undefined ? { nameFilter } : {}),
       }))
     })
     return { container, unmount: () => { act(() => { root.unmount() }); container.remove() } }
@@ -190,6 +240,7 @@ describe('FileTree sort prop', () => {
 })
 
 describe('TreePanel sort control', () => {
+
   function mountPanel(): Harness {
     const container = document.createElement('div')
     document.body.append(container)
@@ -252,5 +303,86 @@ describe('TreePanel sort control', () => {
     click(sortButton(harness.container))
     click(menuItem('Sort by name'))
     expect(rowNames(harness.container)).toEqual(['zdir', 'alpha.ts', 'beta', 'Gamma.MD'])
+  })
+})
+
+describe('FileTree nameFilter', () => {
+  /**
+   * The knowledge base's filter field used to reach only the list view: in the explorer
+   * view typing changed nothing, which the reader reported as "the filter is broken".
+   *
+   * `mountTree` above is block-scoped to its own describe, so this block carries its own
+   * mount helper rather than reaching outside its scope.
+   */
+  function mountFiltered(nameFilter?: string): Harness {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root: Root = createRoot(container)
+    act(() => {
+      root.render(createElement(FileTree, {
+        sessionId: 's1',
+        cwd: '/tmp',
+        expanded: [],
+        revealed: [],
+        onToggle: () => {},
+        onOpenFile: () => {},
+        onReferenceFile: () => {},
+        refreshTick: 0,
+        onUploadRequest: () => {},
+        busy: false,
+        ...(nameFilter !== undefined ? { nameFilter } : {}),
+      }))
+    })
+    return { container, unmount: () => { act(() => { root.unmount() }); container.remove() } }
+  }
+
+  it('renders every row when the term is blank', async () => {
+    harness = mountFiltered('')
+    await act(async () => {})
+    expect(rowNames(harness.container)).toEqual(['zdir', 'alpha.ts', 'beta', 'Gamma.MD'])
+  })
+
+  it('renders every row when the prop is absent, keeping the old behaviour', async () => {
+    harness = mountFiltered()
+    await act(async () => {})
+    expect(rowNames(harness.container)).toEqual(['zdir', 'alpha.ts', 'beta', 'Gamma.MD'])
+  })
+
+  it('keeps only the rows whose name contains the term', async () => {
+    harness = mountFiltered('a')
+    await act(async () => {})
+    // `alpha.ts`, `beta` and `Gamma.MD` all contain an `a` (the last one case-insensitively);
+    // `zdir` does not.
+    expect(rowNames(harness.container)).toEqual(['alpha.ts', 'beta', 'Gamma.MD'])
+  })
+
+  it('matches case-insensitively', async () => {
+    harness = mountFiltered('gamma')
+    await act(async () => {})
+    expect(rowNames(harness.container)).toEqual(['Gamma.MD'])
+  })
+
+  it('trims the term', async () => {
+    harness = mountFiltered('  beta  ')
+    await act(async () => {})
+    expect(rowNames(harness.container)).toEqual(['beta'])
+  })
+
+  it('says so when no name matches, rather than leaving the body empty', async () => {
+    // An empty body is indistinguishable from a tree that failed to load.
+    harness = mountFiltered('zzz-nothing')
+    await act(async () => {})
+    expect(rowNames(harness.container)).toEqual([])
+    // The dictionary follows the test environment's language, so the assertion is that the
+    // sentence is there at all -- not which language it came out in.
+    expect(harness.container.textContent).toMatch(/No matching files|没有匹配的文件/u)
+  })
+
+  it('filters what is already loaded, without another request', async () => {
+    harness = mountFiltered('beta')
+    await act(async () => {})
+    expect(rowNames(harness.container)).toEqual(['beta'])
+    // One batch for the root level on mount, and nothing added by the filter itself.
+    expect(fsTrees.mock.calls.length).toBe(1)
   })
 })
