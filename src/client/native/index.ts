@@ -23,7 +23,6 @@
  * absent from the native guide and `openTab` refuses it.
  */
 import type { Context } from '../../context-types.ts'
-import { addressBaseOf, resolveAddressPath } from '../address-base.ts'
 import { t } from '../locales.ts'
 import { splitTrailingLineSpec } from '../path-line.ts'
 import { baseName } from '../paths.ts'
@@ -39,6 +38,7 @@ import {
   type NativeTabParams,
   type NativeTabRecords,
 } from './tab-adapter.tsx'
+import { registerNativeTabMenuItems } from './tab-menu.tsx'
 
 /**
  * Extensions DSH's own previews own, and this plugin therefore refuses.
@@ -64,7 +64,10 @@ import {
  * `tests/native-surface.spec.ts` pins both directions of this boundary.
  */
 const HOST_OWNED_EXTS: ReadonlySet<string> = new Set([
-  // Spreadsheets: the built-in renders a table in a worker.
+  // Spreadsheets: the built-in document preview owns them. csv/tsv are
+  // included deliberately: the host's ExcelBody (formula bar / sheet tabs /
+  // grid) is the wanted surface, so the editor must decline these addresses
+  // and let `openClaimedNativeFile` hand them to the host's `text` tab type.
   'xlsx', 'xls', 'csv', 'tsv', 'fods',
   // PDF: the built-in viewer pages and zooms.
   'pdf',
@@ -180,29 +183,14 @@ interface Registration {
  * {@link NativeTabParams.line}. The range end and the column are deliberately
  * dropped: {@link splitTrailingLineSpec} parses them, and a start line is all
  * the editor has anywhere to put a cursor.
- *
- * `base` is where an address-relative path is resolved, and it must be the
- * base the ADDRESS was built with — the session's stored header cwd, see
- * `src/client/address-base.ts` — never the tab body's worktree root. Without
- * it the seed stays relative and every downstream reader (the viewer's
- * `fs.read`, the editor, the directory watch) re-bases it on the ACTIVE
- * worktree: a chat link to `<repo>/frontend/.worktrees/wt/a.md` arrives as
- * `frontend/.worktrees/wt/a.md` and is joined onto the worktree root a second
- * time (#947), or silently reads the same-named file of another checkout
- * (#950). Omitted (a caller with no session context) keeps the historical
- * relative seed.
  * @param info - the native tab record the body is drawing.
- * @param base - the address's own base, when the caller knows it.
  * @returns the seed, or `undefined` when the tab is not a file address.
  */
-export function fileParamsOf(info: NativeTabInfo, base?: string): NativeTabParams | undefined {
+export function fileParamsOf(info: NativeTabInfo): NativeTabParams | undefined {
   const address = parseFileAddress(info.tab.contentId)
   if (address === undefined) return undefined
-  // Resolve BEFORE the trailing line spec is split off: the spec belongs to
-  // the file name, and a base can only be prepended to the path.
-  const path = base === undefined ? address.path : resolveAddressPath(base, address.path)
-  const spec = splitTrailingLineSpec(path)
-  if (spec === undefined) return { path }
+  const spec = splitTrailingLineSpec(address.path)
+  if (spec === undefined) return { path: address.path }
   return { path: spec.path, title: baseName(spec.path), line: spec.line }
 }
 
@@ -287,6 +275,20 @@ export function registerNativeSurface(deps: NativeSurfaceDeps): () => void {
     const tabs = injected.get('sidebarRightTabs') as unknown as NativeTabRegistry | undefined
     if (tabs === undefined) return
     const live = new Map<string, Registration>()
+    // The host dock kit owns the outer tab strip's context menu and ships only
+    // its own "关闭" row. The two batch actions are contributed through the
+    // `sidebar.right.tab.menu.item` list slot; registered once per seat, not
+    // once per tab type (a per-type registration would duplicate every row).
+    let disposeTabMenuItems: (() => void) | undefined
+    try {
+      disposeTabMenuItems = registerNativeTabMenuItems(ctx, service)
+    } catch {
+      // A plugin reload can leave the context inactive while this seat body is
+      // still running; `slots.inject` throws then. The next activation re-runs
+      // this body, so the entries are retried rather than reported — the
+      // visible diagnostic channel is reserved for tab types whose registry
+      // slot could otherwise leak.
+    }
 
     const fileSessionIdOf = (info: NativeTabInfo): string | undefined => {
       const address = parseFileAddress(info.tab.contentId)
@@ -410,14 +412,7 @@ export function registerNativeSurface(deps: NativeSurfaceDeps): () => void {
         slots = registerSlots(
           id,
           { ctx, store, service, records, descriptorId: descriptor.id },
-          isEditor
-            ? {
-              // The address's own session, not the seat's: a file address
-              // carries the session whose workspace resolves its path.
-              paramsOf: (info: NativeTabInfo) => fileParamsOf(info, addressBaseOf(ctx, fileSessionIdOf(info))),
-              sessionIdOf: fileSessionIdOf,
-            }
-            : {},
+          isEditor ? { paramsOf: fileParamsOf, sessionIdOf: fileSessionIdOf } : {},
         )
       } catch (error) {
         disposeSafely(disposeType, `native tab type "${id}"`)
@@ -527,6 +522,10 @@ export function registerNativeSurface(deps: NativeSurfaceDeps): () => void {
         disposeSafely(() => registration.dispose(), 'a native tab registration')
       }
       live.clear()
+      if (disposeTabMenuItems !== undefined) {
+        disposeSafely(disposeTabMenuItems, 'the native tab menu entries')
+        disposeTabMenuItems = undefined
+      }
       for (const dispose of disposeSubscriptions.reverse()) disposeSafely(dispose, 'a native tab subscription')
     }
   })

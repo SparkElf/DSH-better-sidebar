@@ -9,11 +9,8 @@
  * ETag (content hash, memoized per file by mtime/size) and honors
  * If-None-Match — the browser revalidates each fetch, but a 304 avoids
  * re-downloading multi-MB chunks that did not change (page refresh, HMR
- * re-activation). A HEAD answers from the stat alone (headers + content-length,
- * no body): the client re-checks every loaded chunk with HEAD when the sidebar
- * re-activates, and Node discards the body of a HEAD response anyway. Same
- * browser-trust fence as every other /sidebar route; only allowlisted chunk
- * names are servable (no path traversal).
+ * re-activation). Same browser-trust fence as every other /sidebar route;
+ * only allowlisted chunk names are servable (no path traversal).
  */
 import { createHash } from 'node:crypto'
 import { stat, readFile } from 'node:fs/promises'
@@ -43,23 +40,22 @@ interface ChunkEtag {
 const etags = new Map<string, ChunkEtag>()
 
 /**
- * The chunk file's ETag (quoted hash) and byte size, or undefined when the
- * file is missing. Hash is recomputed only when mtime/size changed (hashing a
- * multi-MB chunk per request is wasteful); the size comes from the same stat,
- * so a HEAD never has to read the body.
+ * The chunk file's ETag (quoted hash), or undefined when the file is
+ * missing. Hash is recomputed only when mtime/size changed (hashing a
+ * multi-MB chunk per request is wasteful).
  */
-async function etagOf(name: ChunkName, chunkDir: string): Promise<{ etag: string; size: number } | undefined> {
+async function etagOf(name: ChunkName, chunkDir: string): Promise<string | undefined> {
   const path = join(chunkDir, `client-${name}.js`)
   const key = `${chunkDir}:${name}`
   try {
     const info = await stat(path)
     const memo = etags.get(key)
     if (memo !== undefined && memo.mtimeMs === info.mtimeMs && memo.size === info.size) {
-      return { etag: memo.etag, size: info.size }
+      return memo.etag
     }
     const etag = `"${shortHash(await readFile(path))}"`
     etags.set(key, { mtimeMs: info.mtimeMs, size: info.size, etag })
-    return { etag, size: info.size }
+    return etag
   } catch {
     return undefined
   }
@@ -93,29 +89,17 @@ export function createBundleRouteHandler(
       res.end('not found')
       return
     }
-    const info = await etagOf(name, chunkDir)
-    if (info === undefined) {
+    const etag = await etagOf(name, chunkDir)
+    if (etag === undefined) {
       // Registered name but unreadable (bundle not built yet): loud 404.
       res.writeHead(404)
       res.end('not found')
       return
     }
-    if (req.headers['if-none-match'] === info.etag) {
+    if (req.headers['if-none-match'] === etag) {
       // Revalidation hit: unchanged chunk, no body — avoids re-downloading
       // multi-MB scripts on page refresh / HMR re-activation.
-      res.writeHead(304, { 'cache-control': 'no-cache', etag: info.etag })
-      res.end()
-      return
-    }
-    if (req.method === 'HEAD') {
-      // Header-only answer straight from the stat: the client only wants the
-      // ETag, and the body of a HEAD response is discarded by Node anyway.
-      res.writeHead(200, {
-        'content-type': 'text/javascript; charset=utf-8',
-        'cache-control': 'no-cache',
-        etag: info.etag,
-        'content-length': String(info.size),
-      })
+      res.writeHead(304, { 'cache-control': 'no-cache', etag })
       res.end()
       return
     }
@@ -124,7 +108,7 @@ export function createBundleRouteHandler(
       res.writeHead(200, {
         'content-type': 'text/javascript; charset=utf-8',
         'cache-control': 'no-cache',
-        etag: info.etag,
+        etag,
       })
       res.end(body)
     } catch {

@@ -109,20 +109,6 @@
   -webkit-app-region: no-drag;
 }
 
-/* The host float window's resize grip (`data-dockkit-float-resize`, the
-   20×20 bottom-right corner) is the float's LAST child but sits at
-   `z-index: auto`. Tab content we do not control the stacking of may paint
-   above it at z-index 1 — the Git footer and the explorer's multi-select bar
-   both do — which made the grip invisible AND un-hittable: a floating Git tab
-   could not be resized by pointer at all, while the file tab's float (no
-   stacking bottom bar) resized normally. Raise the host's own hook above that
-   class of content; this is the half that also covers third-party tab
-   content we do not own (the content-side cleanup is .gitFooter dropping its
-   own z-index in changes.module.css). */
-:global([data-dockkit-float-resize]) {
-  z-index: 2;
-}
-
 :global([data-dsh-panel-host][data-dsh-panel-host-degraded]) {
   position: absolute;
   top: 0;
@@ -2679,4 +2665,517 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Rows contributed by src/client/native/tab-menu.tsx to the host dock kit's
+ * outer tab context menu. The kit renders embedder entries as raw nodes, so
+ * these follow its own .menuItem metrics and skin tokens (no hardcoded
+ * colors); the card, width and padding stay the kit's. */
+.nativeTabMenuItem {
+  padding: 4px 7px;
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  cursor: pointer;
+}
+
+.nativeTabMenuItem:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.nativeTabMenuItem:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Hairline between the path actions and the close actions contributed to the
+ * host tab menu (same l2 border token the kit's own menu uses). */
+.nativeTabMenuSeparator {
+  height: 0;
+  margin: 3px 2px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* CSV / TSV table viewer (src/client/CsvViewer.tsx). The toolbar wraps on
+ * narrow panes; the grid scrolls both ways under a sticky header. */
+.csvViewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--dsw-alias-bg-primary);
+  color: var(--dsw-alias-label-primary);
+}
+
+.csvToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 10px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-secondary);
+  flex: none;
+}
+
+.csvSegmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+}
+
+.csvSegment {
+  padding: 3px 10px;
+  border: none;
+  border-radius: calc(var(--dsw-radius-md) - 2px);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11);
+  cursor: pointer;
+}
+
+.csvSegment[aria-pressed='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.csvField {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11);
+}
+
+.csvSelect {
+  padding: 2px 4px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-primary);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxxs-11);
+}
+
+.csvMeta {
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11);
+  white-space: nowrap;
+}
+
+.csvReload,
+.csvShowMore {
+  padding: 3px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxxs-11);
+  cursor: pointer;
+}
+
+.csvReload:hover,
+.csvShowMore:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.csvNotice,
+.csvEmpty,
+.csvError {
+  margin: 10px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  background: var(--dsw-alias-bg-secondary);
+}
+
+.csvError {
+  color: var(--dsw-alias-label-error);
+}
+
+.csvScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.csvTable {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  width: max-content;
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+}
+
+.csvTable th,
+.csvTable td {
+  max-width: 360px;
+  padding: 4px 10px;
+  border-right: 0.5px solid var(--dsw-alias-border-l2);
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+  text-align: left;
+  vertical-align: top;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.csvTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dsw-alias-bg-secondary);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.csvRowNumber {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 1%;
+  min-width: 44px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-secondary);
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.csvTable thead .csvRowNumber {
+  z-index: 2;
+}
+
+.csvHeaderCell {
+  white-space: nowrap;
+}
+
+.csvCell {
+  color: var(--dsw-alias-label-primary);
+}
+
+.csvShowMore {
+  align-self: center;
+  margin: 8px;
+}
+
+.csvTextPane {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Start-page grid override ───────────────────────────────────────────────
+   This is a deliberate, narrow CSS takeover of the shipped right-Sidebar
+   guide, not a `sidebar.right.tab.guide` body replacement.
+
+   The host GuideBody lays its cards out in a fixed-width flex column
+   (`entryCell` 380px), so a wider column still shows one card per row. These
+   attribute selectors are global on purpose: the guide belongs to
+   `ui-sidebar-right`, not to this CSS module's hashed class namespace.
+
+   - wide sidebar: as many 300px-minimum cards as fit;
+   - narrow sidebar: one full-width card per row;
+   - the shipped hero compass spans the first row instead of becoming a
+     narrow grid cell.
+
+   The host may change its guide markup; then this override simply stops
+   matching and the shipped layout remains. It must never be mistaken for a
+   body replacement in diagnostics or docs. */
+[data-sidebar-right-guide] {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 120px)) !important;
+  align-content: center !important;
+  align-items: stretch !important;
+  justify-content: center !important;
+  justify-items: stretch !important;
+  gap: 12px !important;
+  padding: 16px !important;
+  overflow: auto !important;
+}
+
+[data-sidebar-right-guide] > div {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  aspect-ratio: 1 / 1 !important;
+  flex: none !important;
+  display: flex !important;
+  min-height: 0 !important;
+}
+
+[data-sidebar-right-guide] > div [data-sidebar-right-guide-entry] {
+  width: 100% !important;
+  height: 100% !important;
+  box-sizing: border-box !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  text-align: center !important;
+  gap: 8px !important;
+  padding: 12px !important;
+}
+
+[data-sidebar-right-guide] kbd,
+[data-sidebar-right-guide] span:has(> kbd) {
+  display: none !important;
+}
+
+[data-sidebar-right-guide] > div [data-sidebar-right-guide-entry] > span:last-child {
+  align-items: center !important;
+  width: 100% !important;
+  flex: 0 1 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* The terminal card carries a shell-menu chevron. Keep it inline with the
+   label, but cap the row and trigger at the title's line height so the 28px
+   button cannot inflate the text block or push the icon upward. */
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] {
+  position: relative !important;
+}
+
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="titleRow"] {
+  position: static !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-wrap: nowrap !important;
+  height: 20px !important;
+  min-height: 0 !important;
+  gap: 2px !important;
+}
+
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="menu"],
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="trigger"],
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] button:not([class*="main"]) {
+  position: static !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: 20px !important;
+  height: 20px !important;
+  min-height: 0 !important;
+  flex: 0 0 20px !important;
+  padding: 0 !important;
+  z-index: 1 !important;
+}
+
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="title"] {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+[data-sidebar-right-guide] > div [data-sidebar-right-guide-entry] span {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+[data-sidebar-right-guide] > span:first-child {
+  grid-column: 1 / -1;
+  justify-self: center;
+  margin: 4px 0 8px;
+}
+
+@media (max-width: 640px) {
+  [data-sidebar-right-guide] {
+    grid-template-columns: repeat(auto-fill, minmax(88px, 108px)) !important;
+    padding: 12px !important;
+  }
+}
+
+/* ── Fullscreen Start: terminal card content ────────────────────────────────
+   The shell entry is a separate provider-owned card (`TerminalGuide`): an
+   absolutely-positioned launch button, an icon, a title row with the shell
+   menu chevron, and an optional description. The generic grid rules above
+   make every card a centred stack; that left the terminal card's content high
+   in a tall cell and squeezed its title beside the 20px menu trigger. Keep
+   the terminal card a row, centre the whole content group vertically, and
+   reserve enough inline room for the full 4-character Chinese title plus the
+   chevron at the 96–120px card width. This is still a CSS override only. */
+[data-sidebar-right-guide-entry="terminal"] {
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: center !important;
+  align-items: center !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  gap: 6px !important;
+  padding: 8px !important;
+  overflow: hidden !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] > span {
+  flex: 0 1 auto !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="text"] {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  gap: 1px !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="titleRow"] {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: row !important;
+  width: 100% !important;
+  height: 18px !important;
+  min-height: 0 !important;
+  max-height: 18px !important;
+  gap: 0 !important;
+  padding: 0 20px !important;
+  box-sizing: border-box !important;
+  justify-content: center !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="title"] {
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  max-width: none !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="trigger"] {
+  position: absolute !important;
+  top: 50% !important;
+  right: 0 !important;
+  transform: translateY(-50%) !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  flex: 0 0 16px !important;
+  padding: 0 !important;
+  z-index: 1 !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="trigger"] svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="description"] {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Non-terminal cards: keep the icon/title/description group vertically
+   centred instead of letting a taller flex child sit at the top. */
+[data-sidebar-right-guide-entry]:not([data-sidebar-right-guide-entry="terminal"]) {
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+[data-sidebar-right-guide-entry]:not([data-sidebar-right-guide-entry="terminal"]) > span:last-child {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  align-self: center !important;
+}
+
+
+/* Fullscreen Start uses the same entry data attributes without the guide
+   ancestor. Keep the non-terminal content group centered there too. */
+[data-sidebar-right-guide-entry]:not([data-sidebar-right-guide-entry="terminal"]) {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  height: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* ── Session header: history button chrome ─────────────────────────────────
+   The history control is owned by @sparkelf/dsh-task-bus, but it sits in the
+   host's `conversation.session.header.utilities` row beside the open-in-app
+   split control. The old rule keyed off the open-in-app CSS-module hash
+   (`.OMoRSG_menuAnchor:has(...[data-open-target="directory"])`), which breaks
+   whenever that module is rebuilt. These selectors use only stable runtime
+   attributes:
+   - the history button's localized aria-label/title and data-session-id;
+   - the open-in-app `data-open-target` attribute.
+   No pointer-events or display changes on the button itself, so tooltip and
+   click behavior stay intact. */
+button[aria-label="消息记录"] svg,
+button[aria-label="消息记录"] svg * {
+  stroke-width: 1 !important;
+}
+
+button[aria-label="消息记录"] {
+  border-left: 0 !important;
+  box-shadow: none !important;
+}
+
+button[aria-label="消息记录"]::before,
+button[aria-label="消息记录"]::after {
+  display: none !important;
+}
+
+/* The vertical rule belonged to the menu anchor wrapper, not the button.
+   Use the stable data attribute inside it; no CSS-module hash. */
+:has(> [data-open-target="directory"]),
+:has([data-open-target="directory"]) {
+  border-left: 0 !important;
+}
+
+:has(> [data-open-target="directory"])::before,
+:has(> [data-open-target="directory"])::after,
+:has([data-open-target="directory"])::before,
+:has([data-open-target="directory"])::after {
+  display: none !important;
+  border-left: 0 !important;
+  background: none !important;
+}
+
+/* Some host headers place a separator as a sibling of the utilities slot.
+   Remove it only in the row that actually contains the history button. */
+:has(> button[aria-label="消息记录"]) {
+  border-left: 0 !important;
+}
+
+:has(> button[aria-label="消息记录"])::before,
+:has(> button[aria-label="消息记录"])::after {
+  display: none !important;
+  border-left: 0 !important;
+}
+
+/* The utility row itself may carry the separator (the history button is one
+   level below the slot's direct child). Match that stable shape too. */
+:has(> * > button[aria-label="消息记录"]) {
+  border-left: 0 !important;
+}
+
+:has(> * > button[aria-label="消息记录"])::before,
+:has(> * > button[aria-label="消息记录"])::after {
+  display: none !important;
+  border-left: 0 !important;
 }

@@ -29,19 +29,16 @@
  */
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
-/**
- * The floating "add to conversation" action: payload + viewport anchor.
- * The payload type belongs to the caller; the hook only carries it through.
- */
-export interface SelectionPopup<T> {
-  insert: T
+/** The floating "add to conversation" action: payload + viewport anchor. */
+export interface SelectionPopup {
+  insert: string
   left: number
   top: number
 }
 
-export interface SelectionPopupOptions<T> {
+export interface SelectionPopupOptions {
   /** Commit the payload into the composer draft (button click). */
-  onCommit(insert: T): void
+  onCommit(insert: string): void
   /**
    * The DOM surface that must stay on screen for the popup to live: the
    * markdown preview container in preview mode, the CodeMirror host
@@ -50,20 +47,20 @@ export interface SelectionPopupOptions<T> {
   getSurface(): HTMLElement | null
 }
 
-export interface SelectionPopupControls<T> {
+export interface SelectionPopupControls {
   /** The current popup (null = hidden). */
-  popup: SelectionPopup<T> | null
+  popup: SelectionPopup | null
   /** Attach to the portaled button element. */
   buttonRef: RefObject<HTMLButtonElement>
   /** Anchor the popup above a selection (viewport-clamped). */
-  show(insert: T, left: number, top: number): void
+  show(insert: string, left: number, top: number): void
   /** Hide the popup (idempotent). */
   hide(): void
   /** The button's click: commit the stored payload, then hide. */
   commit(): void
 }
 
-export function useSelectionPopup<T>(options: SelectionPopupOptions<T>): SelectionPopupControls<T> {
+export function useSelectionPopup(options: SelectionPopupOptions): SelectionPopupControls {
   // Latest-callback refs: the dismissal listeners live for the mount's
   // lifetime, so they must not capture stale closures across renders.
   const onCommitRef = useRef(options.onCommit)
@@ -71,16 +68,16 @@ export function useSelectionPopup<T>(options: SelectionPopupOptions<T>): Selecti
   onCommitRef.current = options.onCommit
   getSurfaceRef.current = options.getSurface
 
-  const [popup, setPopup] = useState<SelectionPopup<T> | null>(null)
+  const [popup, setPopup] = useState<SelectionPopup | null>(null)
   /** Live mirror for click/event-time reads (no re-render race). */
-  const popupRef = useRef<SelectionPopup<T> | null>(null)
+  const popupRef = useRef<SelectionPopup | null>(null)
   /** The portaled button itself (for the outside-click guard). */
   const buttonRef = useRef<HTMLButtonElement>(null)
   /** The surface visibility observer (created lazily on open). */
   const observerRef = useRef<IntersectionObserver | null>(null)
 
-  const show = (insert: T, left: number, top: number): void => {
-    const next: SelectionPopup<T> = {
+  const show = (insert: string, left: number, top: number): void => {
+    const next: SelectionPopup = {
       insert,
       left: Math.min(Math.max(left, 80), window.innerWidth - 80),
       top,

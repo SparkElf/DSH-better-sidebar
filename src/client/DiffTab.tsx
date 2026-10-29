@@ -10,6 +10,7 @@
  * untracked fallbacks and the per-file fold cache cannot drift apart);
  * rendering goes through the shared {@link DiffFiles} renderer.
  */
+import { useMemo } from 'react'
 import { IconRefreshOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionScope } from './api.ts'
 import type { SidebarDiffRef } from './state.ts'
@@ -18,8 +19,9 @@ import { useGitDiffTarget } from './diff/use-git-diff.ts'
 import { t } from './locales.ts'
 import css from './sidebar.module.css'
 
-export function DiffTab(props: { scope: SessionScope; diff: SidebarDiffRef }) {
-  const { scope, diff } = props
+export function DiffTab(props: { sessionId: string; cwd: string | undefined; diff: SidebarDiffRef }) {
+  const { sessionId, cwd, diff } = props
+  const scope = useMemo<SessionScope>(() => ({ sessionId, cwd }), [sessionId, cwd])
   const { loading, error, diffText, untracked, refresh, resolveFold } = useGitDiffTarget(diff, scope)
 
   return (

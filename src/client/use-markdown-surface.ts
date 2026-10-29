@@ -114,11 +114,7 @@ export function useMarkdownSurface(opts: MarkdownSurfaceOptions): MarkdownSurfac
       rememberMarkdownAnchor(sessionId, resolveCwd(), target.path, target.fragment)
     }
     try {
-      // The live root rides along: a destination that resolved to a RELATIVE
-      // path (neither the document's directory nor a cwd was known) must land
-      // on the same workspace the surrounding tree and routes use, not on the
-      // session's frozen header cwd (#950).
-      openSidebarFile(ctx, sessionId, target.path, { line, cwd: resolveCwd() })
+      openSidebarFile(ctx, sessionId, target.path, line)
     } catch (error) {
       // A failed open leaves the reader where they are (the link was claimed);
       // the parked fragment expires on its own.

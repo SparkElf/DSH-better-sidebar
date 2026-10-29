@@ -56,6 +56,7 @@ import { VscFolderOpened, VscLinkExternal, VscPin, VscPinned } from 'react-icons
 import { api, archiveBuild, archiveDownloadUrl, archiveStatus, downloadUrl, SidebarApiError, type FsEntry, type FsLevel } from './api.ts'
 import { compactChain, compactLoadTargets } from './file-tree-compact.ts'
 import { DEFAULT_FILE_TREE_SORT, sortEntries, type FileTreeSort } from './file-tree-sort.ts'
+import { filterLevel, normaliseNeedle } from './listing-filter.ts'
 import { FS_TREES_MAX_PATHS } from '../fs-batch.ts'
 import { builtinFileIcon, builtinFolderIcon } from './file-icons.tsx'
 import { IconUploadOutline16, IconVscode16 } from './icons.tsx'
@@ -530,6 +531,21 @@ export function FileTree(props: {
    *  them (excluded rows never arrive), so changing the list wipes the level
    *  cache and reloads — the rows themselves need no client-side filter. */
   exclude?: readonly string[]
+  /**
+   * Narrow the visible rows to names containing this text.
+   *
+   * Applied to the levels ALREADY LOADED: nothing is re-requested, so typing in the field
+   * costs no round trip. Matching is `listing-filter.ts`'s rule set: substring,
+   * case-insensitive, on the row name only.
+   *
+   * A directory is kept when it matches, when anything below it matches, or when an
+   * ancestor matched -- a hit inside a collapsed folder would otherwise be invisible. The
+   * rows that survive therefore form the same tree, only thinner; expansion state is left
+   * untouched, so clearing the term restores exactly what was on screen.
+   *
+   * Absent or blank means "no filtering", which is the behaviour every other caller gets.
+   */
+  nameFilter?: string
   /** A rename landed (old row path → new path): the caller retargets open tabs. */
   onPathRenamed?: (oldPath: string, newPath: string) => void
   /** A delete landed: the caller closes tabs at or under the removed path. */
@@ -580,16 +596,13 @@ export function FileTree(props: {
   const {
     sessionId, cwd, expanded, revealed, onOpenFileNewTab, onOpenFileSide,
     openInApp, openWithTargets, openWithPinned, openWithSsh, onOpenWith, onToggleOpenWithPin,
-    openWithShowPluginTargets, exclude,
+    openWithShowPluginTargets, exclude, nameFilter,
     onPathRenamed, onPathDeleted, refreshTick, onUploadRequest, busy, hidden, visible, service,
   } = props
   const sort = props.sort ?? DEFAULT_FILE_TREE_SORT
   /** The live props for the stable callbacks below (identity churns per render). */
   const propsRef = useRef(props)
   propsRef.current = props
-  /** Live visibility for the load effects: a parked tree fetches nothing. */
-  const visibleRef = useRef(visible !== false)
-  visibleRef.current = visible !== false
   const [data, setData] = useState<Record<string, LevelData>>({})
   /**
    * Registry revision for the file-icon feature: bumps on ANY registry
@@ -825,12 +838,6 @@ export function FileTree(props: {
    * path — while leaving their current rows untouched until the answer lands.
    */
   const loadLevels = useCallback((paths: readonly string[], options?: { force?: boolean }) => {
-    // A PARKED tree must not fetch, whoever asked: the visible-set effect and
-    // the fold-chain preload are gated at their call sites, but an answer that
-    // lands after the tab was hidden can still re-enter here (the preload's
-    // next link, or the dropped-answer self-heal below). The un-park re-arm
-    // runs with `visible` already true, so it is unaffected.
-    if (visibleRef.current === false) return
     const force = options?.force === true
     const wanted = force
       ? [...new Set(paths)]
@@ -936,11 +943,6 @@ export function FileTree(props: {
     loadLevels([dir], { force: true })
   }, [loadLevels])
 
-  /** Re-list a SET of directories in ONE batch (the parked→visible re-arm). */
-  const retryDirs = useCallback((dirs: readonly string[]) => {
-    if (dirs.length > 0) loadLevels([...dirs], { force: true })
-  }, [loadLevels])
-
   /**
    * Settle the tree after one rename/delete landed at `prefix`: drop every
    * cached level at or under the old path, collapse the now-stale expanded
@@ -994,10 +996,6 @@ export function FileTree(props: {
   useEffect(() => {
     if (lastTick.current === refreshTick) return
     lastTick.current = refreshTick
-    // A parked tree drops the tick outright: the watcher's re-arm re-lists the
-    // whole watched set when the tab comes back, so forcing a load here would
-    // only duplicate that batch (and do it off screen).
-    if (visibleRef.current === false) return
     generationRef.current += 1
     forceNextLoad.current = true
   }, [refreshTick])
@@ -1020,13 +1018,8 @@ export function FileTree(props: {
     // Load the visible set in ONE batch request; already-loaded levels (kept
     // in the cache) are not refetched, so this asks only for what is new — a
     // refresh tick re-lists root + every expanded directory in one POST.
-    //
-    // A PARKED tree issues nothing: nobody can see the rows, and the watcher's
-    // re-arm re-lists the whole watched set once on the way back. Visibility is
-    // read through a ref, NOT a dependency — making it one would fire a second
-    // batch alongside that re-arm.
     const root = cwd
-    if (root === undefined || visibleRef.current === false) return
+    if (root === undefined) return
     const force = forceNextLoad.current
     forceNextLoad.current = false
     loadLevels([root, ...expanded], { force })
@@ -1044,12 +1037,7 @@ export function FileTree(props: {
     // visible-set effect above loading (or having loaded) that level. The walk
     // itself stops at the render cap, so a chain the row stopped folding at
     // MAX_COMPACT_DEPTH never keeps pulling deeper levels.
-    //
-    // A PARKED tree skips the walk too: an in-flight level can land after the
-    // tab was hidden, and without this guard the preload would keep pulling
-    // the next link off screen. Un-parking re-lists the root (watcher re-arm),
-    // and that data change resumes the chain from the frontier.
-    if (cwd === undefined || visibleRef.current === false) return
+    if (cwd === undefined) return
     loadLevels(compactLoadTargets(dataRef.current, [cwd, ...propsRef.current.expanded]))
   }, [cwd, data, loadLevels])
 
@@ -1063,13 +1051,13 @@ export function FileTree(props: {
   // it was opened stayed stale for the rest of the session. A PARKED tree
   // (the host keeps every visited tab body mounted) closes the socket — and
   // with it the host's `fs.watch` handles — and re-lists the watched levels
-  // once (ONE batch) when it comes back.
+  // once when it comes back.
   useDirectoryWatch({
     sessionId,
     root: cwd,
     dirs: expanded,
     visible: visible !== false,
-    onStale: retryDirs,
+    onStale: retryDir,
   })
 
   // Bring a "Show in folder" reveal into view: the ancestors expand above
@@ -1917,16 +1905,36 @@ export function FileTree(props: {
    * `sortEntries` copies (the level cache keeps the host's own order and is
    * never reordered in place).
    */
+  /** The caller's filter, normalised once per change. */
+  const needle = normaliseNeedle(nameFilter ?? '')
+
   const entriesFor = useMemo(() => {
     const cache = new Map<string, readonly FsEntry[]>()
+    /** The loaded children of one directory row, for the filter's descent. */
+    const childrenOf = (entry: FsEntry): readonly FsEntry[] | undefined => {
+      if (!entry.isDir) return undefined
+      const level = data[entry.path]
+      // `undefined` (not yet read) is different from `[]` (read, empty): only the former
+      // means "cannot be searched", so the distinction is preserved here.
+      return level?.entries === undefined ? undefined : sortEntries(level.entries, sort)
+    }
+    const filteredFor = (dir: string): readonly FsEntry[] => {
+      const rows = sortEntries(data[dir]?.entries ?? [], sort)
+      if (needle === '') return rows
+      // Built from the level cache rather than from what is on screen: the filter has to
+      // see the children of a COLLAPSED folder to know whether it should stay visible.
+      // Unloaded levels are simply absent, which the rule set treats as "judge this row
+      // by its own name" -- the same answer the reader gets after expanding it.
+      return filterLevel(rows, childrenOf, needle)
+    }
     return (dir: string): readonly FsEntry[] => {
       const cached = cache.get(dir)
       if (cached !== undefined) return cached
-      const sorted = sortEntries(data[dir]?.entries ?? [], sort)
-      cache.set(dir, sorted)
-      return sorted
+      const rows = filteredFor(dir)
+      cache.set(dir, rows)
+      return rows
     }
-  }, [data, sort])
+  }, [data, sort, needle])
 
   // The Shift range walks the rows the user can actually see: the level's
   // rows in the SAME order `renderLevel` draws them (the sort choice), then

@@ -73,7 +73,6 @@ import { TaskWindow } from './TaskWindow.tsx'
 import type { SidebarStore } from './state.ts'
 import type { WorkflowRunView } from '../workflow-runs.ts'
 import type { ProcessActivitySummary } from '../process-activity.ts'
-import { SIDEBAR_PREFS_DEFAULTS } from '../prefs-shared.ts'
 import legacy from './SubagentView.module.css'
 
 /** Poll cadence of the live "last text + tool call" lines while a child runs. */
@@ -335,21 +334,18 @@ export function SubagentView(props: {
   // `mobileDefaultTree` preference swaps that default to the classic tree —
   // only the default: the toggle below still flips this session's page.
   const narrow = useNarrowViewport()
-  // getPrefs() returns a copy; the snapshot's prefs keep their identity until
-  // setPrefs(), so unrelated sidebar updates do not re-render this page.
-  const prefs = useSyncExternalStore(
+  const prefsMode = useSyncExternalStore(
     useMemo(() => (callback: () => void) => store?.subscribe(callback) ?? (() => {}), [store]),
-    useCallback(() => store?.getSnapshot().prefs ?? SIDEBAR_PREFS_DEFAULTS, [store]),
+    useCallback((): 'graph' | 'tree' => {
+      const prefs = store?.getPrefs()
+      if (narrow && prefs?.mobileDefaultTree === true) return 'tree'
+      return prefs?.tasksViewMode ?? 'graph'
+    }, [store, narrow]),
   )
-  const prefsMode = narrow && prefs.mobileDefaultTree ? 'tree' : prefs.tasksViewMode
   const [modeOverride, setModeOverride] = useState<'graph' | 'tree' | undefined>(undefined)
   const mode = modeOverride ?? prefsMode
 
-  const [foldOverride, setFoldOverride] = useState<boolean | undefined>(undefined)
-  const autoFoldSettled = foldOverride ?? prefs.tasksAutoFoldSettled
-  const autoFoldBranches = foldOverride ?? prefs.tasksAutoFoldBranches
-  const autoFoldIdle = foldOverride ?? prefs.tasksAutoFoldIdle
-  const folded = autoFoldSettled || autoFoldBranches || autoFoldIdle
+  const [folded, setFolded] = useState(true)
   /**
    * Nodes the reader folded by hand from their own card bar. Kept apart from
    * `folded` (the global rule) so the control cluster and a single card never
@@ -387,14 +383,10 @@ export function SubagentView(props: {
         teamMembers,
         teamTasks: team?.tasks ?? [],
         folded,
-        autoFoldSettled,
-        autoFoldBranches,
-        autoFoldIdle,
         foldedIds,
         expandedGroups,
       })),
-    [byId, catalogs, rootId, sessionId, live, metrics, runs, teamMembers, team, folded,
-      autoFoldSettled, autoFoldBranches, autoFoldIdle, foldedIds, expandedGroups],
+    [byId, catalogs, rootId, sessionId, live, metrics, runs, teamMembers, team, folded, foldedIds, expandedGroups],
   )
 
   /**
@@ -565,7 +557,7 @@ export function SubagentView(props: {
    */
   const toggleFold = useCallback((): void => {
     if (!folded) setExpandedGroups(current => (current.size === 0 ? current : new Set()))
-    setFoldOverride(!folded)
+    setFolded(!folded)
   }, [folded])
 
   /** Open the shared task window from a board row (undefined = create). */
@@ -815,7 +807,6 @@ export function SubagentView(props: {
       <JobsDrawer
         rows={jobRows}
         agentCount={agentCount}
-        autoCollapse={prefs.jobsAutoCollapse}
         jobs={treeJobs.jobs}
         observed={observedJob}
         openJobId={popover?.kind === 'job' ? popover.jobId : undefined}

@@ -1,5 +1,5 @@
 /**
- * The 4 built-in file viewer descriptors (markdown / html / jsonl / code),
+ * The 4 default built-in file viewer descriptors (markdown / html / jsonl / code),
  * exactly like external plugins register theirs.
  *
  * DSH 0.1.7 ships `ui-sidebar-documentpreview`, its own code / spreadsheet /
@@ -13,6 +13,10 @@
  *  - `jsonl` — a record-per-row preview (the host maps `.jsonl` to its JSON
  *    highlighter but renders it as one long text document) with the JSONL
  *    editor behind the mode toggle;
+ *  - `csv` is intentionally NOT registered by default: the host document
+ *    preview's ExcelBody owns csv/tsv (formula bar + sheet tabs + grid).
+ *    {@link csvViewerDescriptor} keeps the plugin's own table viewer as an
+ *    explicit fallback for hosts that lack that preview;
  *  - `code` — the catch-all (`exts: []`, lowest priority) that claims any
  *    file no other viewer did, and it is an EDITABLE CodeMirror with save —
  *    the host's equivalents are read-only previews.
@@ -40,6 +44,7 @@ import {
   IconHtmlOutline16,
 } from '../icons.tsx'
 import type { ComponentType } from 'react'
+import { CsvViewer } from '../CsvViewer.tsx'
 import type { FileViewerDescriptor, FileViewerProps } from '../service.ts'
 import { t } from '../locales.ts'
 
@@ -51,7 +56,7 @@ import { t } from '../locales.ts'
  */
 const LazyTextEditor = lazyChunkComponent<FileViewerProps>('editor', (mod) => mod.TextEditor as ComponentType<FileViewerProps> | undefined)
 
-/** The 4 built-in file viewer descriptors. */
+/** The 4 default built-in file viewer descriptors. */
 export function builtinViewers(): readonly FileViewerDescriptor[] {
   return [
     {
@@ -125,4 +130,26 @@ export function builtinViewers(): readonly FileViewerDescriptor[] {
       component: (props) => <LazyTextEditor {...props} />,
     },
   ]
+}
+
+/**
+ * The plugin's own CSV/TSV table viewer as an OPT-IN descriptor.
+ *
+ * It is not part of {@link builtinViewers}: the host document preview's
+ * ExcelBody is the default CSV/TSV surface, and the editor type declines
+ * those addresses so `openSidebarFile` hands them to the host. This export
+ * keeps the table view available for an explicit "open with" path (or a
+ * host build without the document-preview package) without competing for
+ * the default.
+ */
+export function csvViewerDescriptor(): FileViewerDescriptor {
+  return {
+    id: 'csv',
+    title: () => t('viewerCsv'),
+    icon: (size: number) => <IconCodeOutlineRegular size={size} />,
+    exts: ['csv', 'tsv'],
+    priority: 10,
+    fetchStrategy: 'fsRead',
+    component: (props) => <CsvViewer {...props} />,
+  }
 }

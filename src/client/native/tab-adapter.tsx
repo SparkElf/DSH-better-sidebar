@@ -23,7 +23,7 @@
  * Nothing here is a singleton: the registry is created once per client
  * activation and handed to every registration.
  */
-import { createElement, useEffect, useSyncExternalStore } from 'react'
+import { createElement, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import type { Context } from '../../context-types.ts'
 import type { SessionScope } from '../api.ts'
@@ -33,11 +33,10 @@ import { ContextDiagnosticsHost } from '../context-diagnostics-ui.tsx'
 import type { ContextDiagnostics } from '../context-diagnostics.ts'
 import { referenceInChat } from '../reference-in-chat.ts'
 import { useSessionRoot } from '../use-session-root.ts'
-import { useSessionScope } from '../session-scope.ts'
 import type { BetterSidebarService, NativePathTab } from '../service.ts'
 import { t } from '../locales.ts'
-import { isUnread, toggleExpanded } from '../state.ts'
-import type { SidebarStore, SidebarTab, TabType } from '../state.ts'
+import { ancestorDirs, isUnread, revealPaths, toggleExpanded } from '../state.ts'
+import type { SidebarState, SidebarStore, SidebarTab, TabType } from '../state.ts'
 import css from '../sidebar.module.css'
 
 /** The chip glyph's size: the tab strip's own icon scale. */
@@ -171,6 +170,14 @@ export interface NativeTabRecords {
   pathTabs(): NativePathTab[]
   /** Whether this seat session has a record for the id. */
   has(sessionId: string, id: string): boolean
+  /**
+   * Reveal one absolute file path in the session's explorer: expand every
+   * ancestor directory and mark the row, so a file tab's "open containing
+   * folder" can switch to the Files page and land on the file. If the Files
+   * tab has not been minted yet, the reveal is held as a pending seed and
+   * applied by the next `ensure` for the `files` kind.
+   */
+  reveal(sessionId: string, path: string): void
   /** Merge a patch into the synthetic record (the `updateTab` path). */
   update(sessionId: string, id: string, patch: { title?: string; path?: string; meta?: unknown }): void
   /**
@@ -214,6 +221,8 @@ function samePaths(left: readonly string[], right: readonly string[]): boolean {
 export function createNativeTabRecords(): NativeTabRecords {
   const views = new Map<string, View>()
   const instances = new Map<string, number>()
+  /** A reveal requested before the Files tab record exists; consumed by ensure(). */
+  const pendingReveals = new Map<string, string>()
   /**
    * Record key -> the navigation revision whose seed meta was last adopted.
    *
@@ -277,6 +286,8 @@ export function createNativeTabRecords(): NativeTabRecords {
         // there and persists navigations back to the same field, so a record
         // that dropped it opened with an empty address bar.
         const path = params?.path ?? params?.url
+        const pendingReveal = kind === 'files' ? pendingReveals.get(sessionId) : undefined
+        if (pendingReveal !== undefined) pendingReveals.delete(sessionId)
         const minted: View = {
           tab: {
             id,
@@ -289,8 +300,10 @@ export function createNativeTabRecords(): NativeTabRecords {
           },
           scope,
           seat: sessionId,
-          expanded: expandedOf(scope.sessionId),
-          revealed: [],
+          expanded: pendingReveal === undefined
+            ? expandedOf(scope.sessionId)
+            : [...new Set([...expandedOf(scope.sessionId), ...ancestorDirs(scope.cwd, [pendingReveal])])],
+          revealed: pendingReveal === undefined ? [] : [pendingReveal],
           version: 0,
         }
         views.set(key, minted)
@@ -362,10 +375,6 @@ export function createNativeTabRecords(): NativeTabRecords {
             cwd: entry.scope.cwd,
             id: entry.tab.id,
             path,
-            // The chip's title travels with the row: the rename
-            // reconciliation retitles a page only when that title was
-            // derived from the file name (see tree-mutations).
-            title: entry.tab.title,
           })
         }
       }
@@ -405,6 +414,26 @@ export function createNativeTabRecords(): NativeTabRecords {
       }
       store.reduceFor(scopeSessionId, state => toggleExpanded(state, path))
       syncExpanded()
+    },
+    reveal(sessionId, path) {
+      if (path === '') return
+      let applied = false
+      let scope: SessionScope | undefined
+      for (const [key, entry] of [...views]) {
+        if (entry.seat !== sessionId || entry.tab.type !== 'files') continue
+        const expanded = [...new Set([...entry.expanded, ...ancestorDirs(entry.scope.cwd, [path])])]
+        views.set(key, { ...entry, expanded, revealed: [path], version: entry.version + 1 })
+        applied = true
+        scope = entry.scope
+      }
+      if (store !== undefined && scope !== undefined) {
+        const session = scope.sessionId
+        const update = (state: SidebarState): SidebarState => revealPaths(state, scope!.cwd, [path])
+        if (store.getSnapshot().sessionId === session) store.reduce(update)
+        else store.reduceFor(session, update)
+      }
+      if (!applied) pendingReveals.set(sessionId, path)
+      notify()
     },
     retain(sessions) {
       let dropped = false
@@ -501,7 +530,7 @@ export function NativeTabBody(props: NativeBodyInjected & NativeBodyFrameworkPro
   // visited tab body mounted, so an un-gated 5 s `session.cwd` per body is one
   // host-side `git` spawn per tab per tick, forever.
   const cwd = useSessionRoot(ctx, scopeSessionId, { visible: nativeTab.visible })
-  const scope = useSessionScope(scopeSessionId, cwd)
+  const scope = useMemo((): SessionScope => ({ sessionId: scopeSessionId, cwd }), [scopeSessionId, cwd])
   // `version` is not read: it only forces this render when the record changed.
   void version
   const derived = props.paramsOf?.(info)

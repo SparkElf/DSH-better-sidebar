@@ -155,8 +155,12 @@ function LeafView(props: {
    * reveal row; see TabBar). Absent → that row stays disabled.
    */
   onRevealInFileManager?: (path: string) => void
+  /** Download the context tab's file through the host route (TabBar's row). */
+  onDownloadTab?: (tab: SidebarTab) => void
+  /** The session's live workspace root, for the tab menu's copy-path rows. */
+  cwd?: string
 }) {
-  const { leaf, newTabOptions, actions, onNewTab, renderTab, getTabIcon, getTabBadge, getTabRightActions, onRevealInFileManager, isTabUnread } = props
+  const { leaf, newTabOptions, actions, onNewTab, renderTab, getTabIcon, getTabBadge, getTabRightActions, onRevealInFileManager, onDownloadTab, isTabUnread, cwd } = props
   const [dropZone, setDropZone] = useState<DropZone | null>(null)
   const activeTab = leaf.tabs.find(tab => tab.id === leaf.active) ?? leaf.tabs[leaf.tabs.length - 1]
 
@@ -215,6 +219,8 @@ function LeafView(props: {
         isTabUnread={isTabUnread}
         getTabRightActions={getTabRightActions}
         onRevealInFileManager={onRevealInFileManager}
+        onDownloadTab={onDownloadTab}
+        cwd={cwd}
         onDropTab={(payload, before) => {
           if (before === null) actions.moveTabToEdge(payload, leaf.id, 'center')
           else actions.moveTabBefore(payload, leaf.id, before)
@@ -258,8 +264,10 @@ function NodeView(props: {
   isTabUnread?: (tab: SidebarTab) => boolean
   getTabRightActions?: (tab: SidebarTab, paneId: string) => ReactNode
   onRevealInFileManager?: (path: string) => void
+  onDownloadTab?: (tab: SidebarTab) => void
+  cwd?: string
 }) {
-  const { node, state, newTabOptions, actions, onNewTab, renderTab, getTabIcon, getTabBadge, getTabRightActions, onRevealInFileManager, isTabUnread } = props
+  const { node, state, newTabOptions, actions, onNewTab, renderTab, getTabIcon, getTabBadge, getTabRightActions, onRevealInFileManager, onDownloadTab, isTabUnread, cwd } = props
   if (node.kind === 'leaf') {
     return (
       <LeafView
@@ -273,6 +281,8 @@ function NodeView(props: {
         isTabUnread={isTabUnread}
         getTabRightActions={getTabRightActions}
         onRevealInFileManager={onRevealInFileManager}
+        onDownloadTab={onDownloadTab}
+        cwd={cwd}
       />
     )
   }
@@ -303,6 +313,8 @@ function NodeView(props: {
               isTabUnread={isTabUnread}
               getTabRightActions={getTabRightActions}
               onRevealInFileManager={onRevealInFileManager}
+              onDownloadTab={onDownloadTab}
+              cwd={cwd}
             />
           </div>
         </Fragment>
@@ -330,8 +342,12 @@ export function Workbench(props: {
   /** Reveal a tab's file in the OS file manager (see TabBar); absent → the
    *  tab context menu's reveal row is disabled. */
   onRevealInFileManager?: (path: string) => void
+  /** Download the context tab's file through the host route (TabBar's row). */
+  onDownloadTab?: (tab: SidebarTab) => void
+  /** The session's live workspace root, for the tab menu's copy-path rows. */
+  cwd?: string
 }) {
-  const { state, tree, newTabOptions, actions, onNewTab, renderTab, getTabIcon, getTabBadge, getTabRightActions, onRevealInFileManager, isTabUnread } = props
+  const { state, tree, newTabOptions, actions, onNewTab, renderTab, getTabIcon, getTabBadge, getTabRightActions, onRevealInFileManager, onDownloadTab, isTabUnread, cwd } = props
   return (
     <div className={css.workbench}>
       <NodeView
@@ -346,6 +362,8 @@ export function Workbench(props: {
         isTabUnread={isTabUnread}
         getTabRightActions={getTabRightActions}
         onRevealInFileManager={onRevealInFileManager}
+        onDownloadTab={onDownloadTab}
+        cwd={cwd}
       />
     </div>
   )
