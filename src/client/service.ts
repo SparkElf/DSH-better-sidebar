@@ -1616,8 +1616,12 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
    */
   const revealInExplorer = (scope: SessionScope, path: string): void => {
     openTab({ type: 'editor' }, scope)
+    // Apply the reveal to the store the menu sits in. The old session guard
+    // dropped the reveal whenever the tab's content carried no session scope
+    // (the common case for workspace files), so "open location" did nothing;
+    // the store already belongs to the session whose tree is on screen.
     const update = (state: SidebarState): SidebarState => revealPaths(state, scope.cwd, [path])
-    if (store.getSnapshot().sessionId === scope.sessionId) store.reduce(update)
+    store.reduce(update)
   }
 
   const service: BetterSidebarService = {

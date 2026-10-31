@@ -1232,6 +1232,14 @@ const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
     onStale: retryDirs,
   })
 
+  // A reveal is also a selection: the row the user was pointed at becomes the
+  // selected row, so the footer's copy/delete actions target it (the plain
+  // reveal-only outline is too weak a signal for "open location").
+  useEffect(() => {
+    if (revealed.length === 0) return
+    setSelected(new Set(revealed))
+  }, [revealed])
+
   // Bring a "Show in folder" reveal into view: the ancestors expand above
   // (revealPaths), but the row may not be scrolled into sight — a reveal on
   // a long tree should surface the highlighted file. Re-runs when the tree
@@ -1244,13 +1252,24 @@ const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
     if (revealed.length === 0 || propsRef.current.hidden === true) return
     const body = bodyRef.current
     if (body === null) return
-    const row = body.querySelector<HTMLElement>('[data-dsh-revealed]')
-    if (row === null) return
-    const bodyTop = body.getBoundingClientRect().top
-    const rowRect = row.getBoundingClientRect()
-    const target = body.scrollTop + (rowRect.top + rowRect.height / 2) - (bodyTop + body.clientHeight / 2)
-    const max = Math.max(body.scrollHeight - body.clientHeight, 0)
-    body.scrollTo({ top: Math.min(Math.max(target, 0), max), behavior: 'smooth' })
+    // A reveal must land even when the row was just mounted and the tree data
+    // is still settling: retry on the next frame and scroll instantly (a
+    // smooth scroll started before layout settles is silently dropped).
+    let frame = 0
+    const run = (): void => {
+      const row = body.querySelector<HTMLElement>('[data-dsh-revealed]')
+      if (row === null) {
+        frame = window.requestAnimationFrame(run)
+        return
+      }
+      const bodyTop = body.getBoundingClientRect().top
+      const rowRect = row.getBoundingClientRect()
+      const target = body.scrollTop + (rowRect.top + rowRect.height / 2) - (bodyTop + body.clientHeight / 2)
+      const max = Math.max(body.scrollHeight - body.clientHeight, 0)
+      body.scrollTo({ top: Math.min(Math.max(target, 0), max), behavior: 'auto' })
+    }
+    run()
+    return () => window.cancelAnimationFrame(frame)
   }, [revealed, data])
 
   /** Copy `text`; on success flip the row's copied label for a moment. */
@@ -1701,10 +1720,24 @@ const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
   }, [reportOpenFailure])
 
   const revealPath = useCallback((path: string): void => {
-    const handle = propsRef.current.openInApp
-    if (handle === undefined) return
-    void handle.reveal(path).then((ok) => { if (!ok) reportOpenFailure(path) }).catch(() => { reportOpenFailure(path) })
-  }, [reportOpenFailure])
+    // An in-tree reveal: select the row so the footer's copy/delete actions
+    // target it, then scroll it into the middle of this tree's body. The old
+    // openInApp.reveal() handed the path to the OS file manager, which left
+    // the tree unselected -- the exact "opens the panel, nothing selected"
+    // report this replaces.
+    setSelected(new Set([path]))
+    window.requestAnimationFrame(() => {
+      const body = bodyRef.current
+      if (body === null) return
+      const row = body.querySelector<HTMLElement>('[data-dsh-selected]')
+      if (row === null) return
+      const bodyTop = body.getBoundingClientRect().top
+      const rowRect = row.getBoundingClientRect()
+      const target = body.scrollTop + (rowRect.top + rowRect.height / 2) - (bodyTop + body.clientHeight / 2)
+      const max = Math.max(body.scrollHeight - body.clientHeight, 0)
+      body.scrollTo({ top: Math.min(Math.max(target, 0), max), behavior: 'auto' })
+    })
+  }, [])
 
   /** The menu label of one plugin open target: a locale key for the built-ins,
    *  the user's own name for custom editors, plus the SSH hint in remote mode. */
