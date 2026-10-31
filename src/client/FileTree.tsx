@@ -75,6 +75,7 @@ import { uploadItemsFromDrop, uploadItemsFromFiles, type UploadItem } from './up
 import { useDirectoryWatch } from './use-dir-watch.ts'
 import { usePolling } from './use-polling.ts'
 import css from './sidebar.module.css'
+import { revealBus } from './reveal-bus.ts'
 
 interface LevelData {
   entries?: FsEntry[]
@@ -1738,6 +1739,11 @@ const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
       body.scrollTo({ top: Math.min(Math.max(target, 0), max), behavior: 'auto' })
     })
   }, [])
+  // Every mounted tree listens for a reveal broadcast: the native right-Sidebar
+  // Files page is a second TreePanel instance that does not share the bottom
+  // store, so this is how "open location" reaches it.
+  useEffect(() => revealBus.subscribe(revealPath), [revealPath])
+
 
   /** The menu label of one plugin open target: a locale key for the built-ins,
    *  the user's own name for custom editors, plus the SSH hint in remote mode. */

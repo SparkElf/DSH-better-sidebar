@@ -33,6 +33,7 @@ import type { SessionScope } from './api.ts'
 import type { SidebarPrefs } from '../prefs-shared.ts'
 import { bindSidechatSurfaces, type SidechatSurfaceAdapter } from './sidechat-surface.ts'
 export type { SidechatSurface, SidechatSurfaceAdapter } from './sidechat-surface.ts'
+import { revealBus } from './reveal-bus.ts'
 
 /**
  * Public state vocabulary re-exported for consumers (type-only; the values
@@ -1616,12 +1617,19 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
    */
   const revealInExplorer = (scope: SessionScope, path: string): void => {
     openTab({ type: 'editor' }, scope)
-    // Apply the reveal to the store the menu sits in. The old session guard
-    // dropped the reveal whenever the tab's content carried no session scope
-    // (the common case for workspace files), so "open location" did nothing;
-    // the store already belongs to the session whose tree is on screen.
+    // Apply the reveal to the store the menu sits in (the bottom workbench)
+    // AND broadcast it to every mounted tree, so the native right-Sidebar
+    // Files page -- a separate TreePanel instance -- also selects the row.
     const update = (state: SidebarState): SidebarState => revealPaths(state, scope.cwd, [path])
     store.reduce(update)
+    revealBus.emit(path)
+    // The first open mints the Files page, so the tree mounts AFTER this call
+    // and misses the broadcast (the second click always worked). Replay the
+    // reveal once the new page has had time to mount.
+    window.setTimeout(() => {
+      store.reduce(update)
+      revealBus.emit(path)
+    }, 350)
   }
 
   const service: BetterSidebarService = {
