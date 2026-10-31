@@ -23,7 +23,7 @@ import type { ReactNode } from 'react'
 import type { Context } from '../context-types.ts'
 import {
   activateTab as activateTabReducer, allLeaves, closeTab as closeTabReducer,
-  leafWithTab, openTabInBottomPane, patchTab, tabOpenIn,
+  leafWithTab, openTabInBottomPane, patchTab, revealPaths, tabOpenIn,
   type SidebarSnapshot, type SidebarState, type SidebarStore, type SidebarTab, type TabType,
 } from './state.ts'
 import { baseName, extOf } from './paths.ts'
@@ -834,6 +834,12 @@ export interface BetterSidebarService {
   /** Open a file in the sidebar editor of `scope`'s session (title defaults to the file name). */
   openFile(scope: SessionScope, path: string, title?: string): void
   /**
+   * Open the path-less Files page (the explorer) and reveal `path` in the
+   * tree: every ancestor directory is expanded and the row is highlighted.
+   * Used by the tab context menu's "open containing folder" row.
+   */
+  revealInExplorer(scope: SessionScope, path: string): void
+  /**
    * Resolve one of the plugin's own host routes (`sidebar/api/fs.read`) into
    * an absolute URL the page can fetch even when the GUI is served under a
    * reverse-proxy directory (v0.25.0+; `features` contains 'hostRouteUrl').
@@ -1602,6 +1608,18 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
     openTab({ type: 'editor', title: title ?? baseNameOf(path), path, id: `editor:${path}` }, scope)
   }
 
+  /**
+   * Open the path-less Files page and reveal the path in the tree. The page
+   * open reuses the editor descriptor's path-less branch (the explorer); the
+   * reveal rides the store reducer so it also works when the Files tab is
+   * minted by the same click.
+   */
+  const revealInExplorer = (scope: SessionScope, path: string): void => {
+    openTab({ type: 'editor' }, scope)
+    const update = (state: SidebarState): SidebarState => revealPaths(state, scope.cwd, [path])
+    if (store.getSnapshot().sessionId === scope.sessionId) store.reduce(update)
+  }
+
   const service: BetterSidebarService = {
     registerSidechatSurfaceAdapter: adapter => registerSidechatSurfaceAdapter(adapter),
     registerTab,
@@ -1631,6 +1649,7 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
     updateTab,
     activateTab,
     openFile,
+    revealInExplorer,
     hostRouteUrl: (path: string): string => resolveHostRoute(path).href,
     setSurface: (next: SidebarSurface | undefined) => { surface = next },
     nativePathTabs: () => surface?.pathTabs?.() ?? [],

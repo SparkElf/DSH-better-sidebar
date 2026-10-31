@@ -30,6 +30,7 @@ import { baseName } from '../paths.ts'
 import { parseFileAddress } from '../resource-address.ts'
 import type { ContextDiagnostics } from '../context-diagnostics.ts'
 import type { BetterSidebarService, TabDescriptor } from '../service.ts'
+import { registerNativeTabMenuItems } from './tab-menu.tsx'
 import type { SidebarStore } from '../state.ts'
 import {
   NativeTabBody,
@@ -287,6 +288,16 @@ export function registerNativeSurface(deps: NativeSurfaceDeps): () => void {
     const tabs = injected.get('sidebarRightTabs') as unknown as NativeTabRegistry | undefined
     if (tabs === undefined) return
     const live = new Map<string, Registration>()
+    // The host dock kit owns the outer tab strip's context menu and ships only
+    // its own "关闭" row. The batch actions are contributed through the
+    // `sidebar.right.tab.menu.item` list slot, registered once per seat.
+    let disposeTabMenuItems: (() => void) | undefined
+    try {
+      disposeTabMenuItems = registerNativeTabMenuItems(ctx, service)
+    } catch {
+      // A plugin reload can leave the context inactive while this seat body is
+      // still running; the next activation retries.
+    }
 
     const fileSessionIdOf = (info: NativeTabInfo): string | undefined => {
       const address = parseFileAddress(info.tab.contentId)
@@ -528,6 +539,10 @@ export function registerNativeSurface(deps: NativeSurfaceDeps): () => void {
       }
       live.clear()
       for (const dispose of disposeSubscriptions.reverse()) disposeSafely(dispose, 'a native tab subscription')
+      if (disposeTabMenuItems !== undefined) {
+        disposeSafely(disposeTabMenuItems, 'the native tab menu entries')
+        disposeTabMenuItems = undefined
+      }
     }
   })
   return () => {

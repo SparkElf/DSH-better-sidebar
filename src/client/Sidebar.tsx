@@ -44,6 +44,7 @@ import { useViewportSize } from './breakpoints.ts'
 import { bottomPushHeight } from './layout-push.ts'
 import { TabContent, buildNewTabOptions } from './sidebar/TabContent.tsx'
 import { confirmDiscardDraft, dirtyCount, editorDirtyRevision, subscribeEditorDirty } from './editor-dirty.ts'
+import { downloadUrl } from './api.ts'
 import { createOpenInApp } from './open-in-app.ts'
 import { useCenterColumn } from './sidebar/use-center-column.ts'
 import { useHostFeeds } from './sidebar/use-host-feeds.ts'
@@ -564,6 +565,22 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
     })
   }, [openInApp])
 
+  /**
+   * Download the context tab's file through the host's binary-safe route —
+   * the same hand-off the explorer's download row uses. The route answers
+   * `Content-Disposition: attachment`, so the browser saves the exact bytes.
+   */
+  const downloadTabFile = useCallback((tab: SidebarTab): void => {
+    const path = tab.path
+    if (path === undefined || path === '' || sessionId === undefined) return
+    const anchor = document.createElement('a')
+    anchor.href = downloadUrl({ sessionId, cwd }, path)
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  }, [sessionId, cwd])
+
   if (state === undefined || sessionId === undefined) {
     // No conversation yet: the host stays mounted (the drag shield keeps
     // covering the region) but nothing is rendered — the toggle button lives
@@ -774,6 +791,8 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
             isTabUnread={isTabUnread}
             getTabRightActions={tabRightActionsOf}
             onRevealInFileManager={revealTabFile}
+            onDownloadTab={downloadTabFile}
+            cwd={cwd}
           />
         </div>
       </div>

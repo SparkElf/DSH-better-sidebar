@@ -11,11 +11,19 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconCloseFillRegular, IconPlusOutlineRegular, Menu,
+  IconCloseFillRegular, IconPlusOutlineRegular, Menu, Toast, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SidebarTab } from './state.ts'
+import { isAbsolutePath, workspaceRelativePath } from './paths.ts'
 import { t } from './locales.ts'
 import css from './sidebar.module.css'
+
+/** Join one workspace-relative path onto its root (both `/`-spelled). */
+function joinCopyRoot(root: string, path: string): string {
+  const base = root.replace(/\\/g, '/').replace(/\/+$/, '')
+  const tail = path.replace(/^(?:\.\/)+/, '')
+  return tail === '' ? base : `${base}/${tail}`
+}
 
 /** One + menu option. */
 export interface NewTabOption {
@@ -96,11 +104,20 @@ export function TabBar(props: {
    * shell passes no resolver at all.
    */
   onRevealInFileManager?: (path: string) => void
+  /**
+   * Download the context tab's file through the host's binary-safe route.
+   * Absent (or a tab without a path) disables the row.
+   */
+  onDownloadTab?: (tab: SidebarTab) => void
+  /**
+   * The session's live workspace root, used by the two copy-path rows.
+   */
+  cwd?: string
 }) {
   const {
     paneId, tabs, active, onActivate, onClose, onNewTab, newTabOptions, onDropTab, getTabIcon, getTabBadge, getTabRightActions,
     isTabUnread,
-    onRevealInFileManager,
+    onRevealInFileManager, onDownloadTab, cwd,
   } = props
   const [menuOpen, setMenuOpen] = useState(false)
   // The tab right-click context menu: the target tab plus the cursor
@@ -117,6 +134,29 @@ export function TabBar(props: {
   // path the host could reveal — so the reveal row greys out for them.
   const tabMenuPath = tabs[tabMenuIndex]?.path
   const canReveal = onRevealInFileManager !== undefined && tabMenuPath !== undefined && tabMenuPath !== ''
+  // The two copy rows: a file tab (one carrying a path) is the only target.
+  // The relative spelling is projected against the live workspace root and
+  // is unavailable while that root is unknown or the file lies outside it;
+  // the absolute row needs the root only for a relative stored path.
+  const canCopyPath = tabMenuPath !== undefined && tabMenuPath !== ''
+  const absoluteCopyPath = !canCopyPath
+    ? undefined
+    : isAbsolutePath(tabMenuPath)
+      ? tabMenuPath.replace(/\\/g, '/')
+      : cwd === undefined ? undefined : joinCopyRoot(cwd, tabMenuPath)
+  const relativeCopyPath = !canCopyPath
+    ? undefined
+    : isAbsolutePath(tabMenuPath)
+      ? (cwd === undefined ? undefined : workspaceRelativePath(cwd, tabMenuPath))
+      : tabMenuPath.replace(/^(?:\.\/)+/, '')
+  const canDownload = canCopyPath && onDownloadTab !== undefined
+  const [copied, setCopied] = useState(false)
+  /** Copy one path and flash the success toast only after a real write. */
+  const copyPath = (text: string): void => {
+    void writeClipboard(text).then((written) => {
+      if (written) setCopied(true)
+    })
+  }
 
   // The active tab's right-actions node, resolved up front so the render
   // below can skip the wrapper entirely when there is nothing to show (an
@@ -330,6 +370,13 @@ export function TabBar(props: {
           open={tabMenu !== null && tabMenuIndex >= 0}
           onClose={() => { setTabMenu(null) }}
           items={[
+            // The file actions lead: copy/copy/download act on the tab's file, the
+            // batch rows below act on the strip. A separator keeps the two kinds
+            // of act visually distinct (the same split the 0.28 line shipped).
+            { id: 'copyRelative', label: t('copyRelative'), ...(relativeCopyPath === undefined ? { disabled: true } : {}) },
+            { id: 'copyAbsolute', label: t('copyAbsolute'), ...(absoluteCopyPath === undefined ? { disabled: true } : {}) },
+            { id: 'download', label: t('download'), ...(canDownload ? {} : { disabled: true }) },
+            { type: 'separator', id: 'fileActionsSeparator' },
             // The batch operations come FIRST, above the single-tab close: they act on the
             // whole strip rather than on the row that was right-clicked, and a reader who
             // meant to close one tab must not find "close all" where their thumb already
@@ -348,8 +395,21 @@ export function TabBar(props: {
             const target = tabMenu
             if (target === null) return
             setTabMenu(null)
+            if (id === 'copyRelative') {
+              if (relativeCopyPath !== undefined) copyPath(relativeCopyPath)
+              return
+            }
+            if (id === 'copyAbsolute') {
+              if (absoluteCopyPath !== undefined) copyPath(absoluteCopyPath)
+              return
+            }
             const index = tabs.findIndex(tab => tab.id === target.tabId)
             if (index < 0) return
+            if (id === 'download') {
+              const tab = tabs[index]
+              if (tab !== undefined) onDownloadTab?.(tab)
+              return
+            }
             if (id === 'close') {
               onClose(target.tabId)
             } else if (id === 'closeOthers') {
@@ -389,6 +449,7 @@ export function TabBar(props: {
         strip's layout and change every existing tab bar.
       */}
       {hasRightActions ? <div className={css.tabBarRightActions}>{rightActions}</div> : null}
+      {copied && <Toast text={t('copied')} tone="success" onDone={() => { setCopied(false) }} />}
     </div>
   )
 }
