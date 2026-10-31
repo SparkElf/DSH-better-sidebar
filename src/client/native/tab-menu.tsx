@@ -338,14 +338,13 @@ function OpenFolderItem(props: TabMenuOwnerProps & { readonly ctx: Context; read
 }
 
 /** "Open location": reveals the file in the system file manager. */
-function RevealInFileManagerItem(props: TabMenuOwnerProps & { readonly ctx: Context }): ReactNode {
+function RevealInFileManagerItem(props: TabMenuOwnerProps & { readonly ctx: Context; readonly service: BetterSidebarService }): ReactNode {
   const address = parseFileAddress(props.tab.contentId)
   const sessionId = address?.scope === 'session' ? address.sessionId : sessionOf(props.ctx, props)
   const cwd = useSessionRoot(props.ctx, sessionId)
   if (address === undefined) return null
   const absolute = copiedPaths(props.tab.contentId, cwd)?.absolute
-  const disabled = absolute === undefined
-  const openInApp = createOpenInApp(props.ctx)
+  const disabled = absolute === undefined || sessionId === undefined
   return (
     <>
       <MenuSeparator />
@@ -353,9 +352,11 @@ function RevealInFileManagerItem(props: TabMenuOwnerProps & { readonly ctx: Cont
         label={t('openInFileManager')}
         disabled={disabled}
         onSelect={() => {
-          if (disabled || absolute === undefined) return
+          if (disabled || absolute === undefined || sessionId === undefined) return
           props.dismiss()
-          void openInApp.reveal(absolute)
+          // In-app reveal: select the row, expand its ancestors and scroll it
+          // into sight inside the Files tree.
+          props.service.revealInExplorer({ sessionId, cwd }, absolute)
         }}
       />
     </>
@@ -392,7 +393,7 @@ export function registerNativeTabMenuItems(ctx: Context, service: BetterSidebarS
     register('dsh-better-sidebar:tab-close-others', 40, props => <CloseOthersItem {...props} ctx={ctx} service={service} />)
     register('dsh-better-sidebar:tab-close-all', 50, props => <CloseAllItem {...props} ctx={ctx} service={service} />)
     register('dsh-better-sidebar:tab-open-folder', 60, props => <OpenFolderItem {...props} ctx={ctx} service={service} />)
-    register('dsh-better-sidebar:tab-open-in-file-manager', 65, props => <RevealInFileManagerItem {...props} ctx={ctx} />)
+    register('dsh-better-sidebar:tab-open-in-file-manager', 65, props => <RevealInFileManagerItem {...props} ctx={ctx} service={service} />)
   } catch (error) {
     for (const dispose of disposers.reverse()) dispose()
     throw error
