@@ -1,6 +1,6 @@
 {
   "name": "@sparkelf/dsh-better-sidebar",
-  "version": "0.29.0-sparkelf.2",
+  "version": "0.29.0-sparkelf.9",
   "description": "Better Sidebar for DSH — file tree, editor, changes, tasks and side chat in one column, separate for every conversation. Also exposes a service other plugins use to register sidebar tabs and file viewers.",
   "type": "module",
   "repository": {
@@ -39,7 +39,7 @@
   },
   "packageManager": "pnpm@11.8.0",
   "dsh": {
-    "installName": "dsh-better-sidebar",
+    "installName": "@sparkelf/dsh-better-sidebar",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -56,6 +56,7 @@
     "manifestVersion": 1
   },
   "files": [
+    "dsh.plugin.json",
     "lib/index.js",
     "lib/client.js",
     "lib/client-registry.js",

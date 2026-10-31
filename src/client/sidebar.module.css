@@ -542,10 +542,12 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
    room; the vertical gap keeps the capsule proportions. */
 .paneEmptyCards {
   flex: 1;
+  width: 100%;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   align-content: start;
+  justify-items: stretch;
   gap: 12px;
   padding: 12px;
   overflow: hidden;
@@ -621,7 +623,10 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
 .tab {
   flex: none;
   max-width: 160px;
-  min-width: 64px;
+  /* The floor must leave room for the icon, badge and close control; at the
+     old 64px floor a long file name collapsed to two or three glyphs before
+     the ellipsis, which read as a broken label rather than a truncation. */
+  min-width: 96px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -647,6 +652,7 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
 .tabTitle {
   flex: 1;
   min-width: 0;
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2721,4 +2727,277 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12);
   cursor: default;
+}
+
+/* ── Start-page grid override ───────────────────────────────────────────────
+   This is a deliberate, narrow CSS takeover of the shipped right-Sidebar
+   guide, not a `sidebar.right.tab.guide` body replacement.
+
+   The host GuideBody lays its cards out in a fixed-width flex column
+   (`entryCell` 380px), so a wider column still shows one card per row. These
+   attribute selectors are global on purpose: the guide belongs to
+   `ui-sidebar-right`, not to this CSS module's hashed class namespace.
+
+   - wide sidebar: as many 300px-minimum cards as fit;
+   - narrow sidebar: one full-width card per row;
+   - the shipped hero compass spans the first row instead of becoming a
+     narrow grid cell.
+
+   The host may change its guide markup; then this override simply stops
+   matching and the shipped layout remains. It must never be mistaken for a
+   body replacement in diagnostics or docs. */
+[data-sidebar-right-guide] {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 120px)) !important;
+  align-content: center !important;
+  align-items: stretch !important;
+  justify-content: center !important;
+  justify-items: stretch !important;
+  gap: 12px !important;
+  padding: 16px !important;
+  overflow: auto !important;
+}
+
+[data-sidebar-right-guide] > div {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  aspect-ratio: 1 / 1 !important;
+  flex: none !important;
+  display: flex !important;
+  min-height: 0 !important;
+}
+
+[data-sidebar-right-guide] > div [data-sidebar-right-guide-entry] {
+  width: 100% !important;
+  height: 100% !important;
+  box-sizing: border-box !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  text-align: center !important;
+  gap: 8px !important;
+  padding: 12px !important;
+}
+
+[data-sidebar-right-guide] kbd,
+[data-sidebar-right-guide] span:has(> kbd) {
+  display: none !important;
+}
+
+[data-sidebar-right-guide] > div [data-sidebar-right-guide-entry] > span:last-child {
+  align-items: center !important;
+  width: 100% !important;
+  flex: 0 1 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* The terminal card carries a shell-menu chevron. Keep it inline with the
+   label, but cap the row and trigger at the title's line height so the 28px
+   button cannot inflate the text block or push the icon upward. */
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] {
+  position: relative !important;
+}
+
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="titleRow"] {
+  position: static !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-wrap: nowrap !important;
+  height: 20px !important;
+  min-height: 0 !important;
+  gap: 2px !important;
+}
+
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="menu"],
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="trigger"],
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] button:not([class*="main"]) {
+  position: static !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: 20px !important;
+  height: 20px !important;
+  min-height: 0 !important;
+  flex: 0 0 20px !important;
+  padding: 0 !important;
+  z-index: 1 !important;
+}
+
+[data-sidebar-right-guide] [data-sidebar-right-guide-entry="terminal"] [class*="title"] {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+[data-sidebar-right-guide] > div [data-sidebar-right-guide-entry] span {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+[data-sidebar-right-guide] > span:first-child {
+  grid-column: 1 / -1;
+  justify-self: center;
+  margin: 4px 0 8px;
+}
+
+@media (max-width: 640px) {
+  [data-sidebar-right-guide] {
+    grid-template-columns: repeat(auto-fill, minmax(88px, 108px)) !important;
+    padding: 12px !important;
+  }
+}
+
+/* ── Fullscreen Start: terminal card content ────────────────────────────────
+   The shell entry is a separate provider-owned card (`TerminalGuide`): an
+   absolutely-positioned launch button, an icon, a title row with the shell
+   menu chevron, and an optional description. The generic grid rules above
+   make every card a centred stack; that left the terminal card's content high
+   in a tall cell and squeezed its title beside the 20px menu trigger. Keep
+   the terminal card a row, centre the whole content group vertically, and
+   reserve enough inline room for the full 4-character Chinese title plus the
+   chevron at the 96–120px card width. This is still a CSS override only. */
+[data-sidebar-right-guide-entry="terminal"] {
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: center !important;
+  align-items: center !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  gap: 6px !important;
+  padding: 8px !important;
+  overflow: hidden !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] > span {
+  flex: 0 1 auto !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="text"] {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  gap: 1px !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="titleRow"] {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: row !important;
+  width: 100% !important;
+  height: 18px !important;
+  min-height: 0 !important;
+  max-height: 18px !important;
+  gap: 0 !important;
+  padding: 0 20px !important;
+  box-sizing: border-box !important;
+  justify-content: center !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="title"] {
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  max-width: none !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="trigger"] {
+  position: absolute !important;
+  top: 50% !important;
+  right: 0 !important;
+  transform: translateY(-50%) !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  flex: 0 0 16px !important;
+  padding: 0 !important;
+  z-index: 1 !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="trigger"] svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+[data-sidebar-right-guide-entry="terminal"] [class*="description"] {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Non-terminal cards: keep the icon/title/description group vertically
+   centred instead of letting a taller flex child sit at the top. */
+[data-sidebar-right-guide-entry]:not([data-sidebar-right-guide-entry="terminal"]) {
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+[data-sidebar-right-guide-entry]:not([data-sidebar-right-guide-entry="terminal"]) > span:last-child {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  align-self: center !important;
+}
+
+
+/* Fullscreen Start uses the same entry data attributes without the guide
+   ancestor. Keep the non-terminal content group centered there too. */
+[data-sidebar-right-guide-entry]:not([data-sidebar-right-guide-entry="terminal"]) {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  height: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Contributed rows of the host tab context menu. The dock kit renders these as
+ * raw nodes, so without a class the <button> falls back to the browser default
+ * (the opaque gray boxes); the metrics follow the kit's own .menuItem. */
+.nativeTabMenuItem {
+  padding: 5px 8px;
+  color: var(--dsw-alias-label-primary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.nativeTabMenuItem:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.nativeTabMenuItem:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nativeTabMenuSeparator {
+  height: 0;
+  margin: 3px 2px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
 }
