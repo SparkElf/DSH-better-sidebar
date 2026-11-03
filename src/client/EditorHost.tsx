@@ -610,6 +610,23 @@ export function EditorHost(props: {
             </button>
           </div>
         )}
+        {toolbar?.htmlSandbox !== undefined && (
+          <button
+            type="button"
+            className={css.iconButton}
+            aria-label={t('sandboxPromptTitle')}
+            title={t('sandboxPromptTitle')}
+            style={toolbar.htmlSandbox.sandboxed ? undefined : { color: '#e5484d' }}
+            onClick={() => { controlsRef.current?.requestSandboxPrompt?.() }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path d="M8 1.8 13 3.6v4.1c0 3.1-2.1 5.4-5 6.5-2.9-1.1-5-3.4-5-6.5V3.6L8 1.8Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              {toolbar.htmlSandbox.sandboxed
+                ? <path d="m5.6 8 1.7 1.7 3.3-3.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                : <path d="M8 4.8v3.4M8 10.9v.1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />}
+            </svg>
+          </button>
+        )}
         {toolbar?.dirty === true && <span className={css.dirtyDot} title={t('unsaved')} />}
         {toolbar?.editable === true && toolbar?.largeFile !== true && (
           <button

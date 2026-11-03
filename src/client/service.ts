@@ -376,12 +376,16 @@ export interface EditorToolbarState {
    *  size and the download escape hatch. */
   largeFile?: boolean
   saveState: 'idle' | 'saving' | 'saved' | 'failed'
+  /** HTML previews only: the current embedding-sandbox state for the header icon. */
+  htmlSandbox?: { sandboxed: boolean }
 }
 
 /** The commands the host's merged-mode header sends back to the viewer. */
 export interface EditorToolbarControls {
   setMode(mode: 'preview' | 'edit'): void
   save(): void
+  /** HTML previews only: reopen the sandbox prompt from the header icon. */
+  requestSandboxPrompt?(): void
 }
 
 /** Describes one file previewer (builtins register themselves too). */

@@ -37,7 +37,6 @@ import { languageForPath } from './lang.ts'
 import { cmSurfaceTheme, CmThemeCompartment } from './cm-themes.ts'
 import { cmSearchExtensions, CmSearchPhrases } from './cm-search.ts'
 import { isDarkScheme, subscribeColorScheme } from './theme.ts'
-import { SandboxStatusBar } from './SandboxStatusBar.tsx'
 import { insertReferenceOrText, type PendingReference } from './conversation-draft.ts'
 import { useSelectionPopup } from './selection-popup.ts'
 import { buildSelectionInsert, linesOfSelection } from './selection-payload.ts'
@@ -51,6 +50,7 @@ import { localeSignature, t } from './locales.ts'
 import { HTML_IFRAME_SANDBOX } from './html-preview.ts'
 import type { EditorToolbarState, FileViewerProps } from './service.ts'
 import css from './sidebar.module.css'
+import { ConfirmDialog } from './ui/index.ts'
 
 /** Previewable files (rendered output vs source editing). */
 type ViewMode = 'preview' | 'edit'
@@ -923,8 +923,13 @@ export function TextEditor(props: FileViewerProps) {
   // sandbox OFF the preview iframe drops its sandbox attribute entirely —
   // the previewed page then runs on the GUI's own origin with full session
   // access.
-  const [localUnlock, setLocalUnlock] = useState(() => props.store?.getPrefs().htmlViewerDefaultUnsafe === true)
-  const htmlNoSandbox = props.store?.getPrefs().htmlViewerNoSandbox === true || localUnlock
+  // The global setting forces previews unsandboxed; otherwise every freshly opened
+  // HTML preview asks first, and the answer decides the FIRST iframe load — the
+  // page must never run sandboxed and then be unlocked after its scripts already ran.
+  const globalNoSandbox = props.store?.getPrefs().htmlViewerNoSandbox === true
+  const [sandboxChoice, setSandboxChoice] = useState<boolean | null>(globalNoSandbox ? false : null)
+  const [sandboxPrompt, setSandboxPrompt] = useState<'initial' | 'manual' | null>(html && !globalNoSandbox ? 'initial' : null)
+  const htmlNoSandbox = globalNoSandbox || sandboxChoice === false
 
   // Host-toolbar mode (the merged editor header renders the controls): skip
   // the own toolbar row, report the state after every relevant render (the
@@ -933,7 +938,7 @@ export function TextEditor(props: FileViewerProps) {
   const lastToolbarRef = useRef('')
   useEffect(() => {
     if (!hostToolbar) return
-    const state: EditorToolbarState = { modes: toggleable, mode, dirty, editable, ...(readOnly ? { largeFile: true } : {}), saveState }
+    const state: EditorToolbarState = { modes: toggleable, mode, dirty, editable, ...(readOnly ? { largeFile: true } : {}), saveState, ...(html ? { htmlSandbox: { sandboxed: !htmlNoSandbox } } : {}) }
     const key = JSON.stringify(state)
     if (lastToolbarRef.current === key) return
     lastToolbarRef.current = key
@@ -943,7 +948,7 @@ export function TextEditor(props: FileViewerProps) {
     if (!hostToolbar) return
     // `save` reads live refs only, and `setMode` is the stable state setter —
     // registering this render's closures is safe for the mount's lifetime.
-    props.onToolbarControls?.({ setMode, save })
+    props.onToolbarControls?.({ setMode, save, requestSandboxPrompt: () => { setSandboxPrompt('manual') } })
     return () => { props.onToolbarControls?.(null) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostToolbar])
@@ -1114,20 +1119,14 @@ export function TextEditor(props: FileViewerProps) {
           </MarkdownDelegateProvider>
         </div>
       )}
-      {html && mode === 'preview' && (
+      {html && mode === 'preview' && sandboxPrompt === null && (
         <>
-          <SandboxStatusBar
-            sandboxed={!htmlNoSandbox}
-            local={localUnlock}
-            dangerCopy={t('htmlNoSandboxWarning')}
-            onUnlock={() => { setLocalUnlock(true) }}
-            onRestore={() => { setLocalUnlock(false) }}
-          />
           {/* Route-src (never srcdoc — a srcdoc frame inherits the parent
               origin when unsandboxed; the route URL keeps the frame
               cross-origin by construction). The preview shows the SAVED
               file; the draft is only visible in edit mode. */}
           <iframe
+            key={`${path}:${htmlNoSandbox ? 'unsandboxed' : 'sandboxed'}`}
             className={css.editorHtml}
             src={htmlUrl(scope, path)}
             sandbox={htmlNoSandbox ? undefined : HTML_IFRAME_SANDBOX}
@@ -1137,6 +1136,15 @@ export function TextEditor(props: FileViewerProps) {
           />
         </>
       )}
+      <ConfirmDialog
+        open={sandboxPrompt !== null}
+        title={t('sandboxPromptTitle')}
+        description={t('sandboxPromptDesc')}
+        confirmLabel={t('sandboxPromptEnable')}
+        cancelLabel={t('sandboxPromptDisable')}
+        onConfirm={() => { setSandboxChoice(true); setSandboxPrompt(null) }}
+        onClose={() => { setSandboxChoice(false); setSandboxPrompt(null) }}
+      />
       {selectionPopup.popup !== null && createPortal(
         <button
           type="button"

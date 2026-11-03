@@ -38,5 +38,5 @@
 # fail loudly at the loader as before.
 - insert:
     - id: better-sidebar
-      name: 'dsh-better-sidebar'
+      name: '@sparkelf/dsh-better-sidebar'
       disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-better-sidebar' && e.options.id !== 'better-sidebar' && !e.disabled)"
