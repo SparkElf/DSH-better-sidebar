@@ -138,7 +138,7 @@ function pathTabsOf(store: SidebarStore, native: readonly NativePathTab[]): Path
       for (const tab of leaf.tabs) {
         // A bottom-workbench row carries an absolute path already, and it is the
         // same string the tree hands this module — one spelling, both fields.
-        if (tab.path === undefined) continue
+        if (typeof tab.path !== 'string') continue
         tabs.push({
           key: pathTabKey(sessionId, tab.id),
           id: tab.id,

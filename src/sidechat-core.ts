@@ -1227,7 +1227,7 @@ export function sideThreadRows(
   const rows: SideThreadRow[] = []
   for (const summary of Object.values(byId)) {
     if (summary.origin !== 'subagent' || summary.parentId !== sessionId) continue
-    if (!summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)) continue
+    if (typeof summary.displayTitle !== 'string' || !summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)) continue
     rows.push({ id: summary.id, title: summary.displayTitle, running: summary.running === true })
   }
   return rows

@@ -1204,6 +1204,10 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
   // order (first wins), which is what lets an external plugin own "every
   // extension I did not name" without also owning the ones DSH draws.
   const fileIcon = (path: string, size: number): ReactNode => {
+    // Tab records are JSON-backed: an absent path can be `null`. A non-string
+    // has no file icon; falling through keeps the tab strip rendering instead
+    // of throwing on path.lastIndexOf.
+    if (typeof path !== 'string') return null
     const specific = matchFileIcon(path)
     if (specific !== undefined) {
       const icon = safeIcon(specific, path, size)
@@ -1364,7 +1368,7 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
           kind: seed.type,
           params: {
             title,
-            ...(seed.path === undefined ? {} : { path: seed.path }),
+            ...(typeof seed.path === 'string' ? { path: seed.path } : {}),
             ...(seed.url === undefined ? {} : { url: seed.url }),
             ...(seed.diff === undefined ? {} : { diff: seed.diff }),
             ...(synthetic.meta === undefined ? {} : { meta: synthetic.meta }),

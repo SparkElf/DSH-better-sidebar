@@ -1,7 +1,7 @@
 import './browser-globals.ts'
 import { describe, expect, it } from 'vitest'
 import { decodeHtmlUrl } from '../src/html-route.ts'
-import { isAbsolutePath, relativeTo, workspaceRelativePath } from '../src/client/paths.ts'
+import { isAbsolutePath, relativeTo, workspaceRelativePath, baseName, extOf } from '../src/client/paths.ts'
 import { resolveSidebarPath } from '../src/client/paths.ts'
 import { downloadUrl, htmlUrl, mediaUrl } from '../src/client/api.ts'
 
@@ -136,5 +136,23 @@ describe('workspaceRelativePath', () => {
     ['C:/Work', 'D:/Work/a.ts'],
   ])('refuses an unavailable root or unsafe projection %j / %s', (root, path) => {
     expect(workspaceRelativePath(root, path)).toBeUndefined()
+  })
+})
+
+describe('null-shaped paths from persisted tab state', () => {
+  // Tab records are JSON-backed and the native surface does not validate
+  // `navigation.params`: an absent path can arrive as `null` rather than
+  // `undefined`. Every helper below used to throw on it, and one of those
+  // throws (isAbsolutePath inside a render) blanked the whole sidebar.
+  it('treats a null path as not absolute', () => {
+    expect(isAbsolutePath(null as unknown as string)).toBe(false)
+    expect(isAbsolutePath(undefined as unknown as string)).toBe(false)
+  })
+
+  it('projects empty strings instead of dereferencing null', () => {
+    expect(relativeTo('/work', null as unknown as string)).toBe('')
+    expect(baseName(null as unknown as string)).toBe('')
+    expect(extOf(null as unknown as string)).toBe('')
+    expect(resolveSidebarPath('/work', null as unknown as string)).toBe('')
   })
 })

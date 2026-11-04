@@ -371,6 +371,14 @@ describe('sideThreadRows', () => {
     const rows = sideThreadRows(byId, 'main')
     expect(rows).toEqual([{ id: 'thread', title: 'Side: q', running: true }])
   })
+
+  it('skips a subagent row whose title is null instead of throwing', () => {
+    const byId: Record<string, SidebarSessionSummary> = {
+      main: summary({ id: 'main', displayTitle: 'Main' }),
+      broken: summary({ id: 'broken', origin: 'subagent', parentId: 'main', displayTitle: null as unknown as string }),
+    }
+    expect(sideThreadRows(byId, 'main')).toEqual([])
+  })
 })
 
 describe('save eligibility', () => {
