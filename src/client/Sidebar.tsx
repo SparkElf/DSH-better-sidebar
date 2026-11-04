@@ -614,7 +614,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
    * descriptor icon.
    */
   const tabIconOf = (tab: SidebarTab): ReactNode => {
-    if (tab.type === 'editor' && tab.path !== undefined && (tab.meta as { dir?: boolean } | undefined)?.dir !== true) {
+    if (tab.type === 'editor' && typeof tab.path === 'string' && (tab.meta as { dir?: boolean } | undefined)?.dir !== true) {
       return ctx.get('betterSidebar')?.fileIcon(tab.path, 14) ?? null
     }
     const descriptor = ctx.get('betterSidebar')?.getTab(tab.type)

@@ -21,6 +21,11 @@
  * comment — so a produced UNC path is never joined onto the cwd.
  */
 export function isAbsolutePath(path: string): boolean {
+  // Persisted and native tab state is JSON: an absent path can arrive as
+  // `null` rather than `undefined`, and calling startsWith on it used to take
+  // the whole sidebar render down (the root RenderBoundary rail). Any
+  // non-string is "not absolute" rather than a crash.
+  if (typeof path !== 'string') return false
   // A `~`-relative path (`~`, `~/...`, `~\...`) names the user's home, not a
   // session-relative path (#713): never join it onto the cwd client-side.
   return path === '~' || path.startsWith('~/') || path.startsWith('~\\')
@@ -40,6 +45,7 @@ export function isAbsolutePath(path: string): boolean {
  * relative text keeps the caller's own casing.
  */
 export function relativeTo(cwd: string, path: string): string {
+  if (typeof path !== 'string') return ''
   const base = cwd.replace(/[\\/]+$/, '')
   const norm = (value: string): string => value.replace(/\\/g, '/')
   const nBase = norm(base)
@@ -91,6 +97,7 @@ export function isWithinWorkspace(base: string, target: string): boolean {
  * a worktree label). Returns the whole string when no separator is present.
  */
 export function baseName(path: string): string {
+  if (typeof path !== 'string') return ''
   const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   return at === -1 ? path : path.slice(at + 1)
 }
@@ -102,6 +109,7 @@ export function baseName(path: string): string {
  * extension matching (service.ts), which both live in the core bundle.
  */
 export function extOf(path: string): string {
+  if (typeof path !== 'string') return ''
   const at = path.lastIndexOf('.')
   if (at === -1) return ''
   const base = path.slice(at + 1).toLowerCase()
@@ -114,6 +122,8 @@ export function extOf(path: string): string {
  * roots, drive letters and UNC shares must not be joined onto the cwd.
  */
 export function resolveSidebarPath(cwd: string | undefined, path: string): string {
+  // Same JSON-shaped contract as isAbsolutePath: no path, nothing to resolve.
+  if (typeof path !== 'string') return ''
   if (isAbsolutePath(path)) return path
   const base = cwd ?? ''
   if (base === '') return path

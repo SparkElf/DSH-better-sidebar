@@ -338,9 +338,12 @@ function mergeBySeq(
 
 /** The display title of a thread: the durable label minus the 'Side: '
  *  prefix, with the fresh-thread placeholder localized. */
-function threadDisplayTitle(title: string): string {
-  if (title === SIDE_NEW_THREAD_TITLE) return t('sideChatUntitled')
-  return title.startsWith(SIDE_LABEL_PREFIX) ? title.slice(SIDE_LABEL_PREFIX.length) : title
+function threadDisplayTitle(title: string | null | undefined): string {
+  // A summary row's title is JSON-shaped: a session that was never renamed
+  // can carry `null`. Coerce instead of calling startsWith on it.
+  const text = typeof title === 'string' ? title : ''
+  if (text === SIDE_NEW_THREAD_TITLE) return t('sideChatUntitled')
+  return text.startsWith(SIDE_LABEL_PREFIX) ? text.slice(SIDE_LABEL_PREFIX.length) : text
 }
 
 /** How long a composer-bar control waits before its hover bubble opens. */
@@ -887,7 +890,7 @@ export function SideChatView(props: {
   // renames the thread; the strip picks it up here).
   useEffect(() => {
     const display = summary?.displayTitle
-    if (display === undefined) return
+    if (display === undefined || display === null) return
     const title = threadDisplayTitle(display)
     if (title !== '' && title !== tab.title) {
       try {

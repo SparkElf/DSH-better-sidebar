@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   countSubagentDescendants, detectNewDirectSubagent,
-  directSubagentCount, rootAncestor,
+  directSubagentCount, isSideThreadSummary, rootAncestor,
 } from '../src/client/subagent-detect.ts'
 import { isKnownLeaf, subagentCatalogs } from '../src/client/subagent-catalog.ts'
 import type { SidebarSessionList, SidebarSubagentCatalogEntry } from '../src/context-types.ts'
@@ -187,5 +187,14 @@ describe('subagent detection over the sessions list feed', () => {
     expect(pending.cached).toMatchObject({ state: 'ready', entries: [expect.objectContaining({ id: 'a' })] })
     // A host with no projection store at all leaves every catalog empty.
     expect(subagentCatalogs(undefined)).toEqual({})
+  })
+})
+
+describe('side-thread detection over null titles', () => {
+  it('does not throw when a subagent summary carries a null displayTitle', () => {
+    // A never-renamed session's title is JSON null, not "". The filter used
+    // to call displayTitle.startsWith and take the whole render down.
+    const summary = { id: 'c1', displayTitle: null, origin: 'subagent', parentId: 'p1' }
+    expect(isSideThreadSummary(summary as never)).toBe(false)
   })
 })

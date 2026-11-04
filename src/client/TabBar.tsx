@@ -133,12 +133,15 @@ export function TabBar(props: {
   // side-chat / diff pages have none — a diff's repo-relative ref is not a
   // path the host could reveal — so the reveal row greys out for them.
   const tabMenuPath = tabs[tabMenuIndex]?.path
-  const canReveal = onRevealInFileManager !== undefined && tabMenuPath !== undefined && tabMenuPath !== ''
+  // `path` is JSON-shaped on the native surface: an absent path can be `null`,
+  // not just `undefined`. A null used to reach isAbsolutePath() and throw
+  // `null.startsWith` in this render, so gate on the type, not on undefined.
+  const canReveal = onRevealInFileManager !== undefined && typeof tabMenuPath === 'string' && tabMenuPath !== ''
   // The two copy rows: a file tab (one carrying a path) is the only target.
   // The relative spelling is projected against the live workspace root and
   // is unavailable while that root is unknown or the file lies outside it;
   // the absolute row needs the root only for a relative stored path.
-  const canCopyPath = tabMenuPath !== undefined && tabMenuPath !== ''
+  const canCopyPath = typeof tabMenuPath === 'string' && tabMenuPath !== ''
   const absoluteCopyPath = !canCopyPath
     ? undefined
     : isAbsolutePath(tabMenuPath)

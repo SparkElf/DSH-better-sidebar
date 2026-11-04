@@ -282,7 +282,7 @@ export function createNativeTabRecords(): NativeTabRecords {
             id,
             type: kind as TabType,
             title: params?.title ?? seeded?.title ?? title,
-            ...(path === undefined ? {} : { path }),
+            ...(typeof path === 'string' ? { path } : {}),
             ...(params?.line === undefined ? {} : { line: params.line }),
             ...(params?.diff === undefined ? {} : { diff: params.diff }),
             ...(meta === undefined ? {} : { meta }),
@@ -322,7 +322,7 @@ export function createNativeTabRecords(): NativeTabRecords {
       // away, recreating it. Only a real navigation (a new revision) may move
       // the record back onto its address.
       const nextPath = params?.path ?? params?.url
-      if (nextPath !== undefined && nextPath !== existing.tab.path && newNavigation) {
+      if (typeof nextPath === 'string' && nextPath !== existing.tab.path && newNavigation) {
         patch.path = nextPath
       }
       // The landing line clears as well as sets: an in-place switch from
@@ -355,7 +355,7 @@ export function createNativeTabRecords(): NativeTabRecords {
         const path = entry.tab.path
         // A browser tab's address lands on `path` too (a url seed is stored
         // there), so this is every tab bound to a path or an address.
-        if (path !== undefined) {
+        if (typeof path === 'string') {
           tabs.push({
             sessionId: entry.seat,
             scopeSessionId: entry.scope.sessionId,
@@ -640,7 +640,7 @@ export function NativeTabTitle(props: NativeTitleInjected & NativeBodyFrameworkP
   // was just activated and the body has not rendered) or has already been
   // dropped (the body unmounted when the tab was switched away).
   const path = record?.tab.path ?? paramsOf?.(info)?.path
-  const icon = path !== undefined && descriptorId === EDITOR_KIND
+  const icon = typeof path === 'string' && descriptorId === EDITOR_KIND
     ? service.fileIcon(path, CHIP_ICON_SIZE)
     : undefined
   const glyph = icon ?? (typeof descriptor?.icon === 'function'
