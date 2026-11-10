@@ -1,22 +1,28 @@
 /**
  * Sandbox-contract tests for the two built-in web surfaces (HTML preview
- * iframe and the browser tab iframe). The iframe sandbox — opaque origin,
- * no allow-same-origin, no top-navigation — is the PRIMARY security
- * boundary of both features; these tests pin the exact attribute so a
- * refactor cannot silently widen it. The side card settings can drop the
- * sandbox per-feature (warned); those paths render the warning bar and no
- * sandbox attribute.
+ * iframe and the browser tab iframe). The iframe sandbox — no
+ * top-navigation, and (deliberately) `allow-same-origin` so the sidebar's
+ * own fence accepts the frame's requests — is the PRIMARY security boundary
+ * of both features; these tests pin the exact attribute so a refactor cannot
+ * silently widen it. The HTML preview asks before its first load; the
+ * side-card setting can drop the sandbox per feature without asking.
  */
+// @vitest-environment jsdom
 import { describe, expect, it, beforeEach } from 'vitest'
 import { renderToString } from 'react-dom/server'
 import { createElement } from 'react'
+import { act } from 'react-dom/test-utils'
 import './browser-globals.ts'
+import { renderRoot, setupReactAct } from './test-utils.ts'
+
 import type { Context } from '../src/context-types.ts'
 import { TextEditor } from '../src/client/TextEditor.tsx'
 import { HTML_IFRAME_SANDBOX } from '../src/client/html-preview.ts'
 import { DiffPane, HtmlRenderPreview } from '../src/client/changes/DiffPane.tsx'
 import { createSidebarStore } from '../src/client/state.ts'
 import type { FileViewerProps } from '../src/client/service.ts'
+
+setupReactAct()
 
 const CTX = {} as Context
 
@@ -40,78 +46,93 @@ function viewerProps(store: ReturnType<typeof createSidebarStore>, overrides: Pa
 }
 
 describe('HTML preview iframe sandbox', () => {
-  it('renders the preview iframe with the exact sandbox tokens and no same-origin / top-navigation', () => {
+  // The preview asks before the FIRST load: the page must never run
+  // sandboxed and then be unlocked after its scripts already ran.
+  function mountEditor(store: ReturnType<typeof createSidebarStore>, overrides: Partial<FileViewerProps> = {}) {
+    return renderRoot(createElement(TextEditor, viewerProps(store, overrides)))
+  }
+
+  function dialogButton(label: string): HTMLButtonElement {
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find(candidate => candidate.textContent?.trim() === label)
+    if (button === undefined) throw new Error(`dialog button not found: ${label}`)
+    return button
+  }
+
+  it('asks before the first load, then frames the preview with the exact sandbox tokens', () => {
     const store = createSidebarStore()
-    const html = renderToString(createElement(TextEditor, viewerProps(store)))
-    const iframe = /<iframe[^>]*>/.exec(html)?.[0]
-    expect(iframe).toBeDefined()
-    // The sandbox tokens are exactly the exported constant...
-    expect(iframe).toContain(`sandbox="${HTML_IFRAME_SANDBOX}"`)
-    // ...which must never contain the tokens that let a previewed page HIJACK the GUI.
-    expect(HTML_IFRAME_SANDBOX).not.toContain('allow-top-navigation')
-    // `allow-same-origin` IS present, deliberately. Without it the frame is an opaque origin,
-    // its requests carry `Origin: null`, and the sidebar's own fence refuses them: the preview
-    // answered 200 and still rendered as an empty box. The isolation that remains is the
-    // sandbox itself plus the route's own CSP. This is a weaken-the-isolation decision, so it
-    // is asserted rather than left implicit -- see html-preview.ts for the reasoning.
-    expect(HTML_IFRAME_SANDBOX).toContain('allow-same-origin')
-    // Cross-origin framing by construction: route-src (never srcdoc).
-    expect(iframe).toContain('src="http://localhost/sidebar/html/s1/p/a/index.html"')
-    expect(iframe).not.toContain('srcdoc=')
-    // Referrer + permissions policy stay locked even when sandboxed.
-    // (React SSR renders the referrerPolicy prop camelCase as written.)
-    expect(iframe).toContain('referrerPolicy="no-referrer"')
-    expect(iframe).toContain('allow=""')
+    const mounted = mountEditor(store)
+    try {
+      // Nothing is framed while the question is open.
+      expect(mounted.container.querySelector('iframe')).toBeNull()
+      expect(document.body.textContent).toContain('是否启用沙箱限制？')
+      act(() => { dialogButton('启用沙箱').click() })
+      const iframe = mounted.container.querySelector('iframe')
+      expect(iframe).not.toBeNull()
+      // The sandbox tokens are exactly the exported constant...
+      expect(iframe?.getAttribute('sandbox')).toBe(HTML_IFRAME_SANDBOX)
+      // ...which must never contain the tokens that let a previewed page HIJACK the GUI.
+      expect(HTML_IFRAME_SANDBOX).not.toContain('allow-top-navigation')
+      // `allow-same-origin` IS present, deliberately. Without it the frame is an opaque origin,
+      // its requests carry `Origin: null`, and the sidebar's own fence refuses them: the preview
+      // answered 200 and still rendered as an empty box. The isolation that remains is the
+      // sandbox itself plus the route's own CSP. This is a weaken-the-isolation decision, so it
+      // is asserted rather than left implicit -- see html-preview.ts for the reasoning.
+      expect(HTML_IFRAME_SANDBOX).toContain('allow-same-origin')
+      // Cross-origin framing by construction: route-src (never srcdoc).
+      expect(iframe?.getAttribute('src')).toBe(new URL('/sidebar/html/s1/p/a/index.html', window.location.href).toString())
+      expect(mounted.container.innerHTML).not.toContain('srcdoc=')
+      // Referrer + permissions policy stay locked even when sandboxed.
+      expect(iframe?.getAttribute('referrerpolicy')).toBe('no-referrer')
+      expect(iframe?.getAttribute('allow')).toBe('')
+    } finally {
+      mounted.unmount()
+    }
   })
 
-  it('renders the live sandbox status row (green on + temporary unlock action)', () => {
+  it('declining the prompt frames the unsandboxed preview (and offers no restore here)', () => {
     const store = createSidebarStore()
-    const html = renderToString(createElement(TextEditor, viewerProps(store)))
-    // Sandbox ON: the green status + the one-tap temporary unlock button.
-    expect(html).toContain('沙箱模式：已启用')
-    expect(html).toContain('临时解锁（不安全）')
-    // No restore action while the sandbox is on.
-    expect(html).not.toContain('恢复沙箱')
+    const mounted = mountEditor(store)
+    try {
+      act(() => { dialogButton('不启用').click() })
+      const iframe = mounted.container.querySelector('iframe')
+      expect(iframe).not.toBeNull()
+      expect(iframe?.hasAttribute('sandbox')).toBe(false)
+      expect(document.body.textContent).not.toContain('是否启用沙箱限制？')
+    } finally {
+      mounted.unmount()
+    }
   })
 
-  it('drops the sandbox attribute with the red warning when the setting is on (no restore action — the global setting owns it)', () => {
+  it('drops the sandbox attribute without asking when the global setting is on', () => {
     const store = createSidebarStore()
     store.setPrefs({ ...store.getPrefs(), htmlViewerNoSandbox: true })
-    const html = renderToString(createElement(TextEditor, viewerProps(store)))
-    const iframe = /<iframe[^>]*>/.exec(html)?.[0]
-    expect(iframe).toBeDefined()
-    expect(iframe).not.toContain('sandbox=')
-    // The red persistent warning copy is rendered; the temporary-unlock
-    // action is NOT offered (re-enabling is the settings page's job).
-    expect(html).toContain('沙箱已关闭')
-    expect(html).not.toContain('临时解锁（不安全）')
-    expect(html).not.toContain('恢复沙箱')
-  })
-
-  it('starts unsandboxed (red, restorable) when the default-unsafe pref is on', () => {
-    const store = createSidebarStore()
-    store.setPrefs({ ...store.getPrefs(), htmlViewerDefaultUnsafe: true })
-    const html = renderToString(createElement(TextEditor, viewerProps(store)))
-    const iframe = /<iframe[^>]*>/.exec(html)?.[0]
-    expect(iframe).toBeDefined()
-    expect(iframe).not.toContain('sandbox=')
-    // The red warning + the one-tap restore (this is the LOCAL state).
-    expect(html).toContain('沙箱已关闭')
-    expect(html).toContain('恢复沙箱')
-    expect(html).not.toContain('临时解锁（不安全）')
+    const mounted = mountEditor(store)
+    try {
+      expect(document.body.textContent).not.toContain('是否启用沙箱限制？')
+      const iframe = mounted.container.querySelector('iframe')
+      expect(iframe).not.toBeNull()
+      expect(iframe?.hasAttribute('sandbox')).toBe(false)
+    } finally {
+      mounted.unmount()
+    }
   })
 
   it('markdown preview keeps rendering markdown, not an iframe', () => {
     const store = createSidebarStore()
-    const html = renderToString(createElement(TextEditor, viewerProps(store, {
+    const mounted = mountEditor(store, {
       viewerId: 'markdown',
       path: '/p/readme.md',
       content: '# hi',
-    })))
-    expect(html).not.toContain('<iframe')
-    expect(html).not.toContain('/sidebar/html/')
-    // The markdown is rendered into markup, not framed.
-    expect(html).toContain('<h1')
+    })
+    try {
+      expect(mounted.container.querySelector('iframe')).toBeNull()
+      expect(mounted.container.innerHTML).not.toContain('/sidebar/html/')
+      // The markdown is rendered into markup, not framed.
+      expect(mounted.container.innerHTML).toContain('<h1')
+    } finally {
+      mounted.unmount()
+    }
   })
 })
 

@@ -3,8 +3,8 @@
  * hierarchy: the host's DEFAULT handler stays one click away at level 1, and
  * every other application — the host's registered handlers AND (per the
  * visibility rule) the plugin's own fixed targets — lives in the single
- * `openWithMenu` submenu. Reveal-in-file-manager stays at level 1 while the
- * host can hand paths to a desktop.
+ * `openWithMenu` submenu. Reveal-in-file-manager stays at level 1 and is an
+ * in-tree reveal (select + scroll the row), not a host file-manager call.
  *
  * Visibility ("有本机检测到的关联应用时就不显示固定的 openwith 项目"):
  *   - the host lists applications for the path → plugin targets are hidden
@@ -272,7 +272,11 @@ describe('FileTree open-in-app rows in the menu hierarchy', () => {
     expect(handle.open).toHaveBeenCalledWith('/tmp/a.ts', 'preview')
     await openMenu(harness.container, 'a.ts')
     clickMenuitem('Reveal in File Manager')
-    expect(handle.reveal).toHaveBeenCalledWith('/tmp/a.ts')
+    // The reveal is an in-tree action now: the row becomes selected so the
+    // footer's actions target it; the host file-manager handle is not used.
+    expect(handle.reveal).not.toHaveBeenCalled()
+    const selectedRow = harness.container.querySelector<HTMLElement>('[data-dsh-selected]')
+    expect(selectedRow?.textContent).toContain('a.ts')
   })
 
   it('lists the host catalogue for a directory row, with no default row', async () => {

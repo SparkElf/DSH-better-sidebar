@@ -100,7 +100,9 @@ describe('FileTree reveal scrolling (show in folder)', () => {
     tree.layoutRow(400, 20)
     await tree.rerender(['/tmp/a.ts'], 1)
     expect(scrollIntoView).not.toHaveBeenCalled()
-    expect(tree.scrollTo.mock.calls.map(call => call[0])).toContainEqual({ top: 200, behavior: 'smooth' })
+    // Instant, not smooth: a smooth scroll started before the tree layout
+    // settles is silently dropped, so the reveal would land nowhere.
+    expect(tree.scrollTo.mock.calls.map(call => call[0])).toContainEqual({ top: 200, behavior: 'auto' })
     tree.unmount()
   })
 
