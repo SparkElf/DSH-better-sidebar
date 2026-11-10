@@ -270,7 +270,14 @@ describe('host plugin smoke', () => {
     const first = log[0]!
     expect(first.hashFull).toMatch(/^[0-9a-f]{40}$/)
     expect(typeof first.refs).toBe('string')
-    const patch = await git.commitDiff(cwd, first.hashFull)
+    // HEAD can legitimately be an empty merge commit (a branch fold with no
+    // tree change): commitDiff then returns '' by design. Walk back to the
+    // first commit that actually carries a patch.
+    let patch = ''
+    for (const entry of log.slice(0, 20)) {
+      patch = await git.commitDiff(cwd, entry.hashFull)
+      if (patch.includes('diff --git')) break
+    }
     expect(patch).toContain('diff --git')
   })
 

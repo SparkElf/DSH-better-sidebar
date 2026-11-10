@@ -1,8 +1,9 @@
 /**
  * Tab-strip right-click context-menu tests. Right-clicking a tab takes over
  * the browser menu (preventDefault) and shows the tab context menu with
- * exactly six items: close / close others / close to the left / close to the
- * right / close all / reveal in the file manager. All close operations are
+ * exactly nine items: copy relative path / copy absolute path / download /
+ * close others / close to the left / close to the right / close all / close /
+ * reveal in the file manager. All close operations are
  * scoped to the CURRENT pane (the render-time tab snapshot) and reuse the
  * per-tab onClose path, so every closed tab keeps its own lifecycle and the
  * pane never empties mid-loop; "close all" is the one that closes the
@@ -40,12 +41,15 @@ function stubZh(): void {
 /**
  * The menu's rows in order.
  *
- * The batch operations lead and the single-tab close follows after a separator: they act on
- * the whole strip, and a reader reaching for "close" must not find "close all" where their
- * thumb already is.
+ * The file actions lead (copy/copy/download act on the right-clicked tab's
+ * file), then the batch operations, then the single-tab close and the reveal.
+ * A reader reaching for "close" must not find "close all" where their thumb
+ * already is, hence the separators between the three groups.
  */
 const MENU_LABELS = [
-  '关闭其他页签', '关闭左侧页签', '关闭右侧页签', '关闭全部页签', '关闭', '在资源管理器中定位',
+  '复制相对地址', '复制绝对地址', '下载',
+  '关闭其他页签', '关闭左侧页签', '关闭右侧页签', '关闭全部页签',
+  '关闭', '在资源管理器中定位',
 ]
 
 function mountBar(tabs: SidebarTab[], opts: {
@@ -121,9 +125,21 @@ function menuItems(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
 }
 
-/** The disabled flags of the portaled rows, in menu order. */
-function menuDisabled(): boolean[] {
-  return menuItems().map(item => (item as HTMLButtonElement).disabled)
+/** The disabled flags keyed by the row's visible label (locale must be pinned). */
+function menuDisabledByLabel(): Record<string, boolean> {
+  return Object.fromEntries(menuItems().map(item => [item.textContent ?? '', (item as HTMLButtonElement).disabled]))
+}
+
+/** The menu row with the given visible label. */
+function menuItem(label: string): HTMLElement {
+  const item = menuItems().find(candidate => candidate.textContent === label)
+  if (item === undefined) throw new Error(`missing menu row: ${label}`)
+  return item
+}
+
+/** Click the row with the given visible label. */
+function clickMenu(label: string): void {
+  act(() => { menuItem(label).click() })
 }
 
 afterEach(() => {
@@ -134,7 +150,7 @@ afterEach(() => {
 })
 
 describe('TabBar right-click context menu', () => {
-  it('opens the six-item menu at the cursor, prevents the browser menu, and does not activate', () => {
+  it('opens the nine-item menu at the cursor, prevents the browser menu, and does not activate', () => {
     stubZh()
     const { tabEls, onActivate, unmount } = mountBar(fourTabs())
     try {
@@ -156,7 +172,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[4]!.click() })
+      clickMenu('关闭')
       expect(onClose).toHaveBeenCalledTimes(1)
       expect(onClose).toHaveBeenCalledWith('t2')
       expect(menuItems()).toHaveLength(0)
@@ -170,7 +186,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[4]!.click() })
+      clickMenu('关闭')
       expect(onClose).toHaveBeenCalledTimes(1)
       expect(onClose).toHaveBeenCalledWith('t2')
       expect(menuItems()).toHaveLength(0)
@@ -184,7 +200,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[0]!.click() })
+      clickMenu('关闭其他页签')
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t1', 't3', 't4'])
       expect(onClose).not.toHaveBeenCalledWith('t2')
       expect(menuItems()).toHaveLength(0)
@@ -198,7 +214,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[2]!) })
-      act(() => { menuItems()[1]!.click() })
+      clickMenu('关闭左侧页签')
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t1', 't2'])
       expect(menuItems()).toHaveLength(0)
     } finally {
@@ -211,7 +227,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[2]!.click() })
+      clickMenu('关闭右侧页签')
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t3', 't4'])
       expect(menuItems()).toHaveLength(0)
     } finally {
@@ -224,7 +240,7 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onClose, unmount } = mountBar(fourTabs())
     try {
       act(() => { rightClick(tabEls[1]!) })
-      act(() => { menuItems()[3]!.click() })
+      clickMenu('关闭全部页签')
       expect(onClose.mock.calls.map(call => call[0])).toEqual(['t1', 't2', 't3', 't4'])
       expect(menuItems()).toHaveLength(0)
     } finally {
@@ -238,8 +254,15 @@ describe('TabBar right-click context menu', () => {
     try {
       act(() => { rightClick(tabEls[0]!) })
       // The file tab's row is live; the pane's other tab has no file.
-      expect(menuDisabled()).toEqual([false, true, false, false, false, false])
-      act(() => { menuItems()[5]!.click() })
+      expect(menuDisabledByLabel()).toMatchObject({
+        '关闭其他页签': false,
+        '关闭左侧页签': true,
+        '关闭右侧页签': false,
+        '关闭全部页签': false,
+        '关闭': false,
+        '在资源管理器中定位': false,
+      })
+      clickMenu('在资源管理器中定位')
       expect(onRevealInFileManager).toHaveBeenCalledTimes(1)
       expect(onRevealInFileManager).toHaveBeenCalledWith('/repo/src/a.ts')
       // Revealing is not a close: no tab may go away.
@@ -262,9 +285,16 @@ describe('TabBar right-click context menu', () => {
       // close, and the single tab sits at both ends of the strip, so close-left and
       // close-right have nothing to act on either. Close all stays live (the pane always
       // holds at least the right-clicked tab).
-      expect(menuDisabled()).toEqual([true, true, true, false, false, true])
+      expect(menuDisabledByLabel()).toMatchObject({
+        '关闭其他页签': true,
+        '关闭左侧页签': true,
+        '关闭右侧页签': true,
+        '关闭全部页签': false,
+        '关闭': false,
+        '在资源管理器中定位': true,
+      })
       // Clicking the disabled row must not close anything.
-      act(() => { menuItems()[0]!.click() })
+      clickMenu('关闭其他页签')
       expect(single.onClose).not.toHaveBeenCalled()
     } finally {
       single.unmount()
@@ -273,9 +303,23 @@ describe('TabBar right-click context menu', () => {
     const four = mountBar(fourTabs())
     try {
       act(() => { rightClick(four.tabEls[0]!) })
-      expect(menuDisabled()).toEqual([false, true, false, false, false, true])
+      expect(menuDisabledByLabel()).toMatchObject({
+        '关闭其他页签': false,
+        '关闭左侧页签': true,
+        '关闭右侧页签': false,
+        '关闭全部页签': false,
+        '关闭': false,
+        '在资源管理器中定位': true,
+      })
       act(() => { rightClick(four.tabEls[3]!) })
-      expect(menuDisabled()).toEqual([false, false, true, false, false, true])
+      expect(menuDisabledByLabel()).toMatchObject({
+        '关闭其他页签': false,
+        '关闭左侧页签': false,
+        '关闭右侧页签': true,
+        '关闭全部页签': false,
+        '关闭': false,
+        '在资源管理器中定位': true,
+      })
     } finally {
       four.unmount()
     }
@@ -289,8 +333,15 @@ describe('TabBar right-click context menu', () => {
       act(() => { rightClick(tabEls[1]!) })
       // The changes tab carries no file of its own (its diff ref is
       // repo-relative, not a path the host could reveal).
-      expect(menuDisabled()).toEqual([false, false, true, false, false, true])
-      act(() => { menuItems()[5]!.click() })
+      expect(menuDisabledByLabel()).toMatchObject({
+        '关闭其他页签': false,
+        '关闭左侧页签': false,
+        '关闭右侧页签': true,
+        '关闭全部页签': false,
+        '关闭': false,
+        '在资源管理器中定位': true,
+      })
+      clickMenu('在资源管理器中定位')
       expect(onRevealInFileManager).not.toHaveBeenCalled()
       expect(onClose).not.toHaveBeenCalled()
     } finally {
@@ -304,7 +355,7 @@ describe('TabBar right-click context menu', () => {
     try {
       act(() => { rightClick(tabEls[0]!) })
       expect(onRevealInFileManager).toBeUndefined()
-      expect(menuDisabled()[5]).toBe(true)
+      expect(menuDisabledByLabel()['在资源管理器中定位']).toBe(true)
     } finally {
       unmount()
     }
@@ -361,12 +412,12 @@ describe('Workbench tab context menu', () => {
       expect(paneTabs).toHaveLength(2)
       // Each strip's reveal row must reach the resolver with ITS tab's file.
       act(() => { rightClick(paneTabs[0]!) })
-      expect(menuDisabled()[5]).toBe(false)
-      act(() => { menuItems()[5]!.click() })
+      expect(menuDisabledByLabel()['在资源管理器中定位']).toBe(false)
+      clickMenu('在资源管理器中定位')
       expect(onRevealInFileManager).toHaveBeenLastCalledWith('/repo/a.ts')
 
       act(() => { rightClick(paneTabs[1]!) })
-      act(() => { menuItems()[5]!.click() })
+      clickMenu('在资源管理器中定位')
       expect(onRevealInFileManager).toHaveBeenLastCalledWith('/repo/b.ts')
       expect(onRevealInFileManager).toHaveBeenCalledTimes(2)
     } finally {
@@ -422,8 +473,10 @@ describe('Sidebar tab context menu reveal', () => {
       // shape and the row's live state are what matter (the shell runs on the
       // default locale).
       expect(menuItems()).toHaveLength(MENU_LABELS.length)
-      expect(menuDisabled()[5]).toBe(false)
-      await act(async () => { menuItems()[5]!.click() })
+      // The reveal row is last in every locale.
+      const revealRow = menuItems().at(-1)!
+      expect((revealRow as HTMLButtonElement).disabled).toBe(false)
+      await act(async () => { revealRow.click() })
       expect(reveal).toHaveBeenCalledTimes(1)
       expect(reveal).toHaveBeenCalledWith({ path: '/repo/src/probe.ts', action: 'reveal' })
     } finally {
