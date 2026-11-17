@@ -2729,6 +2729,12 @@ const NATIVE_MENU_IDS: ReadonlySet<string> = new Set([
         align="start"
         getAnchorRect={() => (rowMenu === null ? null : new DOMRect(rowMenu.x, rowMenu.y, 0, 0))}
         anchor={<span />}
+        // 0.2.2-rc.2 replaced `getAnchorRect` with `anchorPoint` (client
+        // viewport coordinates). Supplying both keeps the card at the cursor
+        // on either host: each version ignores the prop it does not know, and
+        // without `anchorPoint` the newer host falls back to the detached
+        // `anchor` span and places the card away from the click.
+        {...(rowMenu === null ? {} : { anchorPoint: { x: rowMenu.x, y: rowMenu.y } })}
       />
 
       {/* The single-row delete confirmation: destructive and permanent (no host

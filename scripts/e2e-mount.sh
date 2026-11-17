@@ -77,7 +77,9 @@ if ! node -e '
   const fs = require("fs");
   const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const bundles = p.dsh?.profile?.bundles ?? [];
-  process.exit(bundles.includes("dsh-better-sidebar") ? 0 : 1);
+  // The SparkElf fork publishes under the scoped name; accept both spellings so
+  // this gate checks the MOUNT, not the packaging rename.
+  process.exit(bundles.some((id) => id === "dsh-better-sidebar" || id === "@sparkelf/dsh-better-sidebar") ? 0 : 1);
 ' "$PROFILE_DIR/package.json"; then
   warn "dsh-better-sidebar 未出现在 dsh.profile.bundles 中——挂载未注册"
   cat "$PROFILE_DIR/package.json"
