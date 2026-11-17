@@ -326,8 +326,13 @@ export function SubagentView(props: {
     [list.projectionsBySession, rootId],
   )
   const teamMembers = useMemo(
-    () => teamMembersOf(team, live, byId),
-    [team, live, byId],
+    () => teamMembersOf(team, live, byId, {
+      rootId,
+      // DSH 0.2.2-rc.2 publishes no `members` on `agentTeam`; the roster is the
+      // root's own catalog (see ./team-projection.ts's header).
+      catalog: rootId === undefined ? [] : catalogs[rootId]?.entries ?? [],
+    }),
+    [team, live, byId, rootId, catalogs],
   )
 
   // The default view mode comes from the side card prefs (settings select);

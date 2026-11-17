@@ -432,13 +432,25 @@ export interface SidebarTeamMemberProjection {
 }
 
 /**
- * The Lead Session's published team state: durable roster identities and
- * phases, member errors, the non-deleted task views (0.1.6's `TeamView` shape,
- * enriched per task exactly like the service's own views), and the first
- * rejected Team record when the board had to stop at its last valid state.
+ * The Lead Session's published team state: the durable roster (where the host
+ * still publishes one), the saved Team-mode selection, the non-deleted task
+ * views (enriched per task exactly like the service's own views), and the
+ * first rejected Team record when the board had to stop at its last valid
+ * state.
+ *
+ * DSH 0.2.2-rc.2 CHANGED THIS WIRE CONTRACT: the projection no longer carries
+ * `members` (the roster is the existing `subagentCatalog` projection — see
+ * `packages/team/agent-team/src/types.ts`, `TeamProjection`), and it now
+ * carries `enabled`, the saved Team-mode selection. Both fields are optional
+ * here so one adapter reads hosts on either side of the change: a host that
+ * publishes `members` still wins, and a host that does not gets its roster
+ * rebuilt from the catalog instead of mapping `undefined`.
  */
 export interface SidebarTeamProjection {
-  members: readonly SidebarTeamMemberProjection[]
+  /** Durable roster rows on hosts that still publish them (≤0.2.2-alpha.x). */
+  members?: readonly SidebarTeamMemberProjection[]
+  /** Saved Team-mode selection; absent on hosts that predate the flag. */
+  enabled?: boolean
   tasks: readonly SidebarTeamTaskView[]
   failure?: string
 }
