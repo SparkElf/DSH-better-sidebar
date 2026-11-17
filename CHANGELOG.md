@@ -2,7 +2,7 @@
 
 > 本文档收录 dsh-better-sidebar 的完整发布历史（最新版摘要见 [README](README_ZH.md)；同步发布于 [GitHub Releases](https://github.com/omdsh-dev/DSH-better-sidebar/releases)）。
 
-### v0.30.2（未发布）
+### v0.30.1-sparkelf.21
 
 - 🩺 **`subagents.live` 不再把“会话投影永久不可读”变成每 3 秒一次的 503 风暴**：DSH 0.2.2-rc.2 的 `modelSelection` 投影要求 `reasoningEffort` 是非空 string；当运行态 profile 写的是 `reasoningEffort: null`（旧版“关闭思考”的占位写法）时，`listDescendants` 会在 `sessionQuery.observeSession` 里抛 `SESSION_QUERY_CORRUPT_SESSION`，旧实现把任何 listing 失败都映射成 503，客户端轮询因此持续 503（6fb4 实测 119 次）。现在 `SESSION_QUERY_CORRUPT_SESSION` / `SESSION_QUERY_SOURCE_CONFLICT` 降级为 200 + 根节点 live 行 + `degraded: "catalog-unavailable"`；服务缺失或未分类失败仍 503。子代理卡片继续由会话投影驱动，旧脏会话可正常打开，页面不再刷错误。
   - 🧪 测试：`tests/subagent-live-route.spec.ts` 新增 3 例（corrupt / source-conflict 返回 200 + 根行 + degraded，未分类失败仍 503）；6fb4 真实宿主 Playwright 复验 29/29 200、子代理 391、任务面板“已完成”。

@@ -4,6 +4,11 @@
 >
 > 📝 The Chinese [CHANGELOG](./CHANGELOG.md) is the authoritative, item-by-item record; this file carries the English summaries and has historically lagged behind it. Where the two disagree, the Chinese one is current.
 
+### v0.30.1-sparkelf.21
+
+- 🩺 **`subagents.live` no longer turns a permanently unreadable session projection into a 503 storm every three seconds**: DSH 0.2.2-rc.2 requires a non-empty string for `reasoningEffort` in the `modelSelection` projection. When the runtime profile carried `reasoningEffort: null` (the old "thinking off" placeholder), `listDescendants` failed inside `sessionQuery.observeSession` with `SESSION_QUERY_CORRUPT_SESSION`; the old route mapped any listing failure to 503, so the client's poll produced a continuous 503 storm (119 responses observed on 6fb4). The route now answers 200 with the root's own live row plus `degraded: "catalog-unavailable"` for `SESSION_QUERY_CORRUPT_SESSION` / `SESSION_QUERY_SOURCE_CONFLICT`, while an absent service or an unclassified failure still returns 503. Child cards continue to come from the session's catalog projection; corrupt legacy sessions open without flooding the page with errors.
+  - 🧪 Tests: three new cases in `tests/subagent-live-route.spec.ts` (corrupt / source-conflict answer 200 with the root row and `degraded`, unclassified failure still 503); a real-host Playwright pass on 6fb4 recorded 29/29 200 responses, the subagent result 391, and the task panel showing "completed".
+
 ### v0.30.1
 
 - 🎯 **The "Side card" settings row no longer shows two icons**: the plugin still assumed the settings navigation had no icon channel, so it hid the fallback gear with CSS and painted its own glyph. The shell has long since exposed a `settings.section.icon` slot addressed by section id, and it now wraps the nav icon in a span — the stale `> svg:first-child` rule stopped hiding the fallback, so both glyphs rendered side by side. The row now contributes its icon **through the slot**, and the marker + CSS-mask apparatus is gone (along with a document-wide MutationObserver).
