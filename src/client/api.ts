@@ -211,7 +211,11 @@ export interface FsPageResult {
 }
 
 /** The `subagents.live` response: one row per tree child (and the root). */
-export type SubagentLiveResult = { live: Record<string, SidebarChildLiveView> }
+export type SubagentLiveResult = {
+  live: Record<string, SidebarChildLiveView>
+  /** Present when the host could not read the root's child catalog. */
+  degraded?: 'catalog-unavailable'
+}
 
 /** The `workflows.list` response: the tree's folded workflow runs. */
 export type WorkflowsListResult = { runs: WorkflowRunView[] }
