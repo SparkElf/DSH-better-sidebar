@@ -2,7 +2,9 @@
  * Host route tests for the Subagent live-preview batch API ('subagents.live').
  * The route must enumerate the tree ONCE, keep only catalog-running
  * non-Side-Chat children, fold only non-empty activity from their session
- * logs, and degrade to a 503 when the host subagent runtime is absent.
+ * logs, degrade a permanently unreadable root catalog to a 200 root-only
+ * answer, and answer 503 only for deployment-level failures (absent runtime or
+ * an unclassified listing failure).
  */
 import { describe, expect, it, vi } from 'vitest'
 import { buildSubagentLiveApi } from '../src/subagent-live-route.ts'
@@ -163,7 +165,40 @@ describe('subagents.live route', () => {
     )
   })
 
-  it('degrades to a 503 when listDescendants fails', async () => {
+  it('answers 200 with the root row when the stored catalog is corrupt', async () => {
+    const subagents: SidebarSubagentsService = {
+      listDescendants: vi.fn(async () => {
+        throw Object.assign(
+          new Error('failed to project session "root": reasoningEffort expected string'),
+          { code: 'SESSION_QUERY_CORRUPT_SESSION' },
+        )
+      }),
+    }
+    const sessions = { get: (id: string) => (id === 'root' ? session([reply('still here', 1, 1)]) : undefined) }
+    const api = buildSubagentLiveApi(ctxWith(subagents, sessions))
+    const result = await api.live({ rootSessionId: 'root' })
+    // The page stays usable: the root's own activity is still reported, and
+    // the poller is told why the tree is missing instead of retrying a
+    // permanently unreadable catalog every three seconds.
+    expect(result.degraded).toBe('catalog-unavailable')
+    expect(result.live.root?.text).toBe('still here')
+    expect(Object.keys(result.live)).toEqual(['root'])
+  })
+
+  it('answers 200 with the root row when the catalog conflicts with its source', async () => {
+    const subagents: SidebarSubagentsService = {
+      listDescendants: vi.fn(async () => {
+        throw Object.assign(new Error('source conflict'), { code: 'SESSION_QUERY_SOURCE_CONFLICT' })
+      }),
+    }
+    const api = buildSubagentLiveApi(ctxWith(subagents, { get: () => undefined }))
+    await expect(api.live({ rootSessionId: 'root' })).resolves.toEqual({
+      live: { root: {} },
+      degraded: 'catalog-unavailable',
+    })
+  })
+
+  it('degrades to a 503 when listDescendants fails for another reason', async () => {
     const subagents: SidebarSubagentsService = {
       listDescendants: vi.fn(async () => { throw new Error('projection unavailable') }),
     }
